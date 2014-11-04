@@ -1,4 +1,24 @@
-# TODO: sreg for ld
+/*
+
+    AVR simulator (x86 version)
+    Copyright (C) 2014 Marc Schoolderman
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with this program; if not, write to the Free Software Foundation, Inc.,
+    51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
+*/
+
 .intel_syntax noprefix
 .altmacro
 
@@ -503,7 +523,6 @@ sd dddd 1110 ld -X
 sd dddd 1111 pop/push
 
 */
-    resume
 
 #------------------
 .p2align 3
@@ -553,13 +572,27 @@ umult:
     resume
 
 .p2align 3
-# TODO: mulsu
 smult:
+    test dl, 0x10
+    jnz exotic_mult
     and edx, 0xF
     and ecx, 0xF
     mov al, [avr_ADDR+edx+16]
     imul byte ptr [avr_ADDR+ecx+16]
     jmp 1b
+
+/* 0ddd 0rrr - MULSU  
+   0ddd 1rrr - FMUL
+   1ddd 0rrr - FMULS
+   1ddd 1rrr - FMUSLU */
+exotic_mult:
+    mov al, dl
+    xor al, cl
+    shl al, 5   # CF clear -> (F)MULSU, so don't sign extend Rr, otherwise do
+    sbb ch, ch
+    and cl, 0x7
+    mov cl, [avr_ADDR+ecx]
+    resume
 
 /*
 0ddddd0??? -> 1 operand
