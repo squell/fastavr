@@ -558,11 +558,12 @@ ldd_std:
 umult:
     mov al, [avr_ADDR+edx]
     mul byte ptr [avr_ADDR+ecx]
-1:  mov [avr_ADDR], ax
-    test ax, ax
+1:  test ax, ax
+    bt eax, 15
+2:  mov [avr_ADDR], ax
     setz al
-    shl al, 6
-    shl ah, 1
+    lea eax, [eax*8] # shl al, 6 without modifying CF
+    lea eax, [eax*8]
     adc al, 0
     and ebx, ~(ZF+CF)
     and eax, (ZF+CF)
@@ -584,15 +585,42 @@ smult:
 /* 0ddd 0rrr - MULSU  
    0ddd 1rrr - FMUL
    1ddd 0rrr - FMULS
-   1ddd 1rrr - FMUSLU */
+   1ddd 1rrr - FMULSU */
 exotic_mult:
     mov al, dl
     xor al, cl
-    shl al, 5   # CF clear -> (F)MULSU, so don't sign extend Rr, otherwise do
-    sbb ch, ch
+    shl al, 5   # CF set -> FMUL(S), otherwise (F)MULSU
+    jc fmul
     and cl, 0x7
-    mov cl, [avr_ADDR+ecx]
-    resume
+    and dl, 0xF
+    btr edx, 3  # CF set -> FMULSU, otherwise MULSU
+    mov al, [avr_ADDR+edx+16]
+    mov dl, [avr_ADDR+ecx+16]
+    setc cl
+    cbw
+    imul dx
+    test ax, ax   # probe ax for ZF and CF in case of MULSU
+    bt ax, 15
+    shl ax, cl    # otherwise use the result of shl
+    jmp 2b
+
+fmul:           
+    test cl, 0x8
+    jz fmuls
+    and cl, 0x7
+    and dl, 0x7
+    mov al, [avr_ADDR+ecx+16]
+    mul byte ptr [avr_ADDR+edx+16]
+    shl ax, 1
+    jmp 2b
+
+fmuls:
+    and cl, 0x7
+    and dl, 0x7
+    mov al, [avr_ADDR+ecx+16]
+    imul byte ptr [avr_ADDR+edx+16]
+    shl ax, 1
+    jmp 2b
 
 /*
 0ddddd0??? -> 1 operand
