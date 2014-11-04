@@ -76,7 +76,6 @@ flagcvt:
 .irp S, 0,1
 .irp Z, 0,1
 .irp CxSA, 0,1
-#.byte (\A<<5) ^ ((\O^\S)<<4) ^ (\O<<3) ^ (\S<<2) ^ (\Z<<1) ^ (\CxSA^(\S*\A))
 .byte (\A<<5) ^ (((\OxC^(\CxSA^(\S*\A)))^\S)<<4) ^ ((\OxC^(\CxSA^(\S*\A)))<<3) ^ (\S<<2) ^ (\Z<<1) ^ (\CxSA^(\S*\A))
 .endr
 .endr
@@ -639,19 +638,25 @@ e_1op_misc:
     btr ecx, 4
     jc e_sbiw_adiw
     jmp [subdecode_table+eax*4]
-# TODO: investigate if there are carry issues by simulating sbiw with add
+
+# this is a bit painful to write without using any further aconditional jumps
 e_sbiw_adiw:
     mov eax, edx
     and eax, 0xC
+    and edx, 0x13
     lea ecx, [eax*4+ecx]
-    bt edx, 4
-    sbb eax, eax
-    xor ecx, eax
-    sub ecx, eax
-    and edx, 3
-    add word ptr [avr_ADDR+edx*2+24], cx
+    btr edx, 4           # CF set -> sbiw instruction
+    setc al
+    mov si, [avr_ADDR+edx*2+24]
+    sub si, cx
     pushf
-    pop eax
+    add cx, [avr_ADDR+edx*2+24]
+    pushf
+    bt eax, 0
+    mov eax, [esp+eax*4] # load the appropriate flags in eax
+    cmovc ecx, esi       # and the appropriate result in ecx
+    mov [avr_ADDR+edx*2+24], cx
+    add esp, 8
     and ebx, ~(SF+OF+ZF+CF)
     and eax, SF+OF+ZF+CF
     or ebx, eax
