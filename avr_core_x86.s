@@ -64,6 +64,9 @@ ZF = 1<<6
 CF = 1<<0
 
 FASTFLAG=1
+PAR=1
+PAR_LDS=PAR
+PAR_STK=PAR
 
 .if FASTFLAG
 .data
@@ -127,8 +130,39 @@ flagcvt:
     and edx, 0xF
 .endm
 
+.macro decode_next_instr
+    movzx eax, word ptr [avr_FLASH+edi*2]
+
+    # begin decoding the r/d, so the pipeline has something to do while jumping
+    mov esi, eax
+    mov edx, eax
+    and esi, 0xF
+    lea ecx, [esi+0x10]
+    shr edx, 4
+    and edx, 0x1F
+    shr eax, 10
+    cmovnc ecx, esi
+
+.if 0
+pusha
+dec edi
+push edi
+call avr_debug
+pop eax
+popa
+.endif
+    add dword ptr [avr_cycle], 1
+    adc dword ptr [avr_cycle+4], 0
+    inc edi
+    jmp [decode_table+eax*4]
+.endm
+
 .macro resume
+.if FASTRESUME
+    decode_next_instr
+.else
     jmp fetch
+.endif
 .endm
 
 .macro cmpc dst, reg
@@ -195,30 +229,7 @@ avr_run:
 
 .p2align 3
 fetch:
-    movzx eax, word ptr [avr_FLASH+edi*2]
-
-    # begin decoding the r/d, so the pipeline has something to do while jumping
-    mov esi, eax
-    mov edx, eax
-    and esi, 0xF
-    lea ecx, [esi+0x10]
-    shr edx, 4
-    and edx, 0x1F
-    shr eax, 10
-    cmovnc ecx, esi
-
-.if 1
-pusha
-dec edi
-push edi
-call avr_debug
-pop eax
-popa
-.endif
-    add dword ptr [avr_cycle], 1
-    adc dword ptr [avr_cycle+4], 0
-    inc edi
-    jmp [decode_table+eax*4]
+    decode_next_instr
 
 .p2align 3
 nop_movw_mul:
@@ -450,16 +461,24 @@ ld_st:
     # switch eax with immediate if LDS
     mov esi, 0xF
     and esi, ecx
+    .if PAR_LDS
     lea esi, [avr_FLASH+edi*2]
     cmovz eax, esi
     lea esi, [edi+1]
     cmovz edi, esi
+    .else
+    jnz 1f
+    lea eax, [avr_FLASH+edi*2]
+    inc edi
+1:
+    .endif
 
     # test for push/pop - use SP instead of X/Y/Z
     # this is a hack but saves jumps
     # if push/pop: xx01 -> pre-incremented, xx10 -> post-decremented
     inc word ptr [avr_SP]       
     lea esi, [ecx+1]
+    .if PAR_STK
     mov ebp, esi
     shr ebp, 4       # ebp: 10b if push, 01b if pop
     lea ebp, [ecx+0x11+ebp]
@@ -468,6 +487,16 @@ ld_st:
     lea esi, [avr_SP]
     cmovz eax, esi
     cmovz ecx, ebp
+    .else
+    test esi, 0xF
+    jnz 1f
+    mov ebp, esi
+    shr ebp, 4       # ebp: 10b if push, 01b if pop
+    lea ecx, [ecx+0x11+ebp]
+    and esi, 0xF     # switch esi/ecx if push/pop
+    lea eax, [avr_SP]
+1:
+    .endif
     
     movzx ebp, word ptr [eax]
     bt ecx, 1   # handle pre-decrement/post-increment here
@@ -668,7 +697,7 @@ e_sbiw_adiw:
 f_flag_misc:
     avr_flags ebx
     btr edx, 4
-    jc f_misc
+    jc f_ret
 f_set_clr:
     xor edx, edx
     btr ecx, 3 # if CF, clear, otherwise set flag
@@ -681,7 +710,7 @@ f_set_clr:
     resume
 
 .p2align 3
-f_misc:
+f_ret:
 # 0000  -> ret  <- only insns implementeed TODO: the rest
 # 0001  -> reti <- ,,                        ,,
 # 1000  -> sleep
@@ -689,11 +718,11 @@ f_misc:
 # 1010  -> wdr
 # 11s0  -> lpm/spm implied r0 freak instruction
 # 11s1  -> elpm/espm implied r0 freak instruction
-    cmp edx, 0x1
-    ja unhandled
+    btr edx, 3
+    jc f_misc
 
     shr edx, 1
-    rcl dl, 1
+    rcr dl, 1
     or [avr_SREG], dl    # set the IF in SREG if RETI
     movzx eax, word ptr [avr_SP]
     add eax, 2
@@ -703,6 +732,19 @@ f_misc:
     add dword ptr [avr_cycle], 3
     adc dword ptr [avr_cycle+4], 0
     resume
+
+.p2align 3
+f_misc:
+# treat sleep/break and wdr as exit conditions; let the caller decide what to do
+    test edx, 0x4
+    jnz f_spm
+    mov esi, edx
+    jmp exit
+
+.p2align 3
+f_spm:
+#TODO: spm/lpm r0 family; not sure how yet
+    jmp unhandled
 
 .p2align 3
 f_com:
@@ -783,8 +825,15 @@ f_abs_jump:
     resume
 
 unhandled:
+    xor esi, esi
+    dec esi
+    mov si, [avr_FLASH+(edi-1)*2] # store illegal opcode in lower word
 
 exit:
+    # wrap-up
+    avr_flags
+    mov [avr_IP], edi
+    mov eax, esi
     pop esi
     pop edi
     pop ebx
