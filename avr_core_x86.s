@@ -92,7 +92,7 @@ flagcvt:
     .if FASTFLAG
     and ebx, 0x8d1       
     lea eax, [ebx*8+ebx] 
-    or al, ah
+    xor al, ah
     and eax, 0x1F
     mov al, [flagcvt+eax]
     mov ah, [avr_SREG]
