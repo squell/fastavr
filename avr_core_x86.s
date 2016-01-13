@@ -63,6 +63,7 @@ SF = 1<<7
 ZF = 1<<6
 CF = 1<<0
 
+FASTRESUME=0
 FASTFLAG=1
 PAR=1
 PAR_LDS=PAR
@@ -110,7 +111,7 @@ flagcvt:
     lea eax, [edx*8+edx]
     and eax, 0x4e10
     xor dl, ah
-    lea eax, [eax*2+eax]
+    lea eax, [eax*2+eax] # BUG?
     xor al, ah
     and edx, 0xF
     and eax, 0xC
@@ -187,10 +188,12 @@ popa
     .else
     pop eax
     and ebx, ~(flags)
+    .ifc <shift>, <>
     and eax,  flags
     or ebx, eax
-    .ifnc <shift>, <>
-    and eax, SF+CF
+    .else
+    and eax, SF+ZF+CF
+    or ebx, eax
     shl eax, 4
     shr al, 1
     xor ah, al
@@ -236,7 +239,6 @@ nop_movw_mul:
     test cl, 0x10
     jnz smult
     and edx, 0xF
-    and ecx, 0xF
     mov cx, [avr_ADDR+ecx*2]
     mov [avr_ADDR+edx*2], cx
     resume
@@ -331,12 +333,12 @@ skipins:
     inc edi
     # test if we are a LDS/STS instr
     and ax, 0xFC0F
-    cmp ax, 0x9000
+    cmp ax, 0x9000 # BUG cmp -> sub
     sub ax, 1
     adc edi, 0
     # test if we are long jump/call
     and dx, 0xFE0C
-    cmp dx, 0x940C
+    cmp dx, 0x940C # BUG cmp -> sub
     sub ax, 1
     adc edi, 0
     sub esi, edi
@@ -381,6 +383,7 @@ rcall:
     mov [avr_ADDR+edx], di
     sub edx, 2
     mov [avr_SP], dx
+    # TODO: cycles on xmega/reduced core tinyavr/22bit IP?
 
 .p2align 3
 rjmp:
@@ -389,17 +392,17 @@ rjmp:
     sar edx, 4+16
     lea edi, [edi+edx]
     shr eax, 3
-    adc dword ptr [avr_cycle], 1
+    adc dword ptr [avr_cycle], 1   
     adc dword ptr [avr_cycle+4], 0
     resume
 
 .p2align 3
 e_bst_bld:
-    avr_flags ebx
+    #avr_flags ebx
     test cl, 0x10
     jnz e_bst
 e_bld:
-    #mov al, [avr_SREG]
+    mov al, [avr_SREG]
     shr al, 6
     and al, 1
     and cl, 7
@@ -424,15 +427,14 @@ io_in:
     push edx
     push ecx
     call avr_io_in
-    pop edx
     pop ecx
+    pop edx
     mov [avr_ADDR+edx], al
     resume
 
 .p2align 3
 io_out1:
     add cl, 32
-
 .p2align 3
 io_out:
     movzx eax, byte ptr [avr_ADDR+edx]
@@ -483,7 +485,7 @@ ld_st:
     shr ebp, 4       # ebp: 10b if push, 01b if pop
     lea ebp, [ecx+0x11+ebp]
 
-    and esi, 0xF     # switch esi/ecx if push/pop
+    test esi, 0xF    # switch esi/ecx if push/pop
     lea esi, [avr_SP]
     cmovz eax, esi
     cmovz ecx, ebp
@@ -493,7 +495,6 @@ ld_st:
     mov ebp, esi
     shr ebp, 4       # ebp: 10b if push, 01b if pop
     lea ecx, [ecx+0x11+ebp]
-    and esi, 0xF     # switch esi/ecx if push/pop
     lea eax, [avr_SP]
 1:
     .endif
@@ -604,7 +605,6 @@ umult:
 smult:
     test dl, 0x10
     jnz exotic_mult
-    and edx, 0xF
     and ecx, 0xF
     mov al, [avr_ADDR+edx+16]
     imul byte ptr [avr_ADDR+ecx+16]
@@ -711,8 +711,8 @@ f_set_clr:
 
 .p2align 3
 f_ret:
-# 0000  -> ret  <- only insns implementeed TODO: the rest
-# 0001  -> reti <- ,,                        ,,
+# 0000  -> ret
+# 0001  -> reti
 # 1000  -> sleep
 # 1001  -> break
 # 1010  -> wdr
@@ -721,8 +721,7 @@ f_ret:
     btr edx, 3
     jc f_misc
 
-    shr edx, 1
-    rcr dl, 1
+    shl dl, 7
     or [avr_SREG], dl    # set the IF in SREG if RETI
     movzx eax, word ptr [avr_SP]
     add eax, 2
@@ -737,12 +736,12 @@ f_ret:
 f_misc:
 # treat sleep/break and wdr as exit conditions; let the caller decide what to do
     test edx, 0x4
-    jnz f_spm
+    jnz f_lpm_spm_r0
     mov esi, edx
     jmp exit
 
 .p2align 3
-f_spm:
+f_lpm_spm_r0:
 #TODO: spm/lpm r0 family; not sure how yet
     jmp unhandled
 
@@ -750,7 +749,7 @@ f_spm:
 f_com:
     .macro compl byte, ptr, dst
     xor byte ptr dst, 0xFF
-    or ebx, 1
+    stc
     .endm
     direct1 compl, OF+SF+ZF+CF
 
@@ -772,8 +771,15 @@ f_lsr:
 
 .p2align 3
 f_ror:
+    .macro rcr_flags byte ptr dst, imm
+    mov al, byte ptr dst
+    inc al
+    dec al # load ZF, SF
+    rcr al, imm
+    mov byte ptr dst, al
+    .endm
     shr ebx, 1
-    direct rcr, OF+SF+ZF+CF, 1, shift
+    direct rcr_flags, OF+SF+ZF+CF, 1, shift
 
 .p2align 3
 f_inc:
@@ -787,7 +793,7 @@ f_dec:
 # TODO: does notsupport EICALL/EIJMP
 f_ind_jump:
     movzx eax, word ptr [avr_SP]
-    bt edx, 4    # if icall, modify stacl
+    bt edx, 4    # if icall, modify stack
     mov si, [avr_ADDR+eax]
     cmovc esi, edi
     mov [avr_ADDR+eax], si
@@ -831,7 +837,7 @@ unhandled:
 
 exit:
     # wrap-up
-    avr_flags
+    avr_flags ebx
     mov [avr_IP], edi
     mov eax, esi
     pop esi
@@ -882,7 +888,7 @@ decode_table:
 /* 1000 11 */ .long ldd_std
 /* 1001 00 */ .long ld_st
 /* 1001 01 */ .long e_1op_misc
-/* 1001 10 */ .long unhandled # I/O space bit operations
+/* 1001 10 */ .long unhandled # I/O space bit operations: CBI/SBI/SBIC/SBIS
 /* 1001 11 */ .long umult
 /* 1010 00 */ .long ldd_std
 /* 1010 01 */ .long ldd_std
