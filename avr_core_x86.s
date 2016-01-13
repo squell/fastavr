@@ -36,7 +36,7 @@
 .text
 
 .macro debug src
-pusha 
+pusha
 pushf
 lea eax, [src]
 push eax
@@ -72,7 +72,7 @@ PAR_STK=PAR
 .data
 .p2align 6
 
-# a loouptabel translating a mangled form of EFLAGS to AVR flags
+# a lookuptable translating a mangled form of EFLAGS to AVR flags
 flagcvt:
 .irp A, 0,1
 .irp OxC, 0,1
@@ -93,8 +93,8 @@ flagcvt:
 # converts ebx from x86 FLAGS to avr avr_SREG -> eax
 .macro avr_flags ebx
     .if FASTFLAG
-    and ebx, 0x8d1       
-    lea eax, [ebx*8+ebx] 
+    and ebx, 0x8d1
+    lea eax, [ebx*8+ebx]
     xor al, ah
     and eax, 0x1F
     mov al, [flagcvt+eax]
@@ -106,18 +106,18 @@ flagcvt:
     .endif
     push edx
     mov edx, ebx
-    and edx, 0x8d1       
-    lea eax, [edx*8+edx] 
-    and eax, 0x4e10      
-    xor dl, ah           
-    lea eax, [eax*2+eax] 
-    xor al, ah           
-    and edx, 0xF        
-    and eax, 0xC        
+    and edx, 0x8d1
+    lea eax, [edx*8+edx]
+    and eax, 0x4e10
+    xor dl, ah
+    lea eax, [eax*2+eax]
+    xor al, ah
+    and edx, 0xF
+    and eax, 0xC
     lea edx, [eax*2+edx]
     mov al, [avr_SREG]
     and al, 0xC0
-    or al, dl            
+    or al, dl
     mov [avr_SREG], al
     pop edx
 .endm
@@ -256,7 +256,7 @@ e_add: direct add
 .p2align 3
 e_sub: direct sub
 .p2align 3
-e_sbc: 
+e_sbc:
     shr ebx, 1
     direct sbb
 .p2align 3
@@ -314,7 +314,7 @@ e_sbrcs:
     btr ecx, 4 # CF=0 <=> skip if clear
     sbb eax, eax
     xor edx, eax
-    bt edx, ecx 
+    bt edx, ecx
     jnc skipins
     resume
 
@@ -444,7 +444,7 @@ io_out:
 
 # this code is optimized for the 'happy path' (ld/st)
 # with tweaks added to support lpm, lds and pop/push
-.p2align 3 
+.p2align 3
 ld_st:
     avr_flags ebx
     add dword ptr [avr_cycle], 1
@@ -455,7 +455,7 @@ ld_st:
     shr eax, 3
     jnbe e_lpm
     adc eax, 0
-    # eax -> 0/1/2 = use X/Y/Z 
+    # eax -> 0/1/2 = use X/Y/Z
     lea eax, [X+eax*2]
 
     # switch eax with immediate if LDS
@@ -476,7 +476,7 @@ ld_st:
     # test for push/pop - use SP instead of X/Y/Z
     # this is a hack but saves jumps
     # if push/pop: xx01 -> pre-incremented, xx10 -> post-decremented
-    inc word ptr [avr_SP]       
+    inc word ptr [avr_SP]
     lea esi, [ecx+1]
     .if PAR_STK
     mov ebp, esi
@@ -497,12 +497,12 @@ ld_st:
     lea eax, [avr_SP]
 1:
     .endif
-    
+
     movzx ebp, word ptr [eax]
     bt ecx, 1   # handle pre-decrement/post-increment here
     sbb ebp, 0
     mov esi, ebp
-    bt ecx, 0   
+    bt ecx, 0
     adc ebp, 0
     mov [eax], bp
 
@@ -530,7 +530,7 @@ e_lpm:
     mov [Z], si
     resume
 /*
-sd dddd 0000 LDS 
+sd dddd 0000 LDS
 sd dddd 0001 ld Z+
 sd dddd 0010 ld -Z
 ????????????????????
@@ -610,7 +610,7 @@ smult:
     imul byte ptr [avr_ADDR+ecx+16]
     jmp 1b
 
-/* 0ddd 0rrr - MULSU  
+/* 0ddd 0rrr - MULSU
    0ddd 1rrr - FMUL
    1ddd 0rrr - FMULS
    1ddd 1rrr - FMULSU */
@@ -632,7 +632,7 @@ exotic_mult:
     shl ax, cl    # otherwise use the result of shl
     jmp 2b
 
-fmul:           
+fmul:
     test cl, 0x8
     jz fmuls
     and cl, 0x7
@@ -657,7 +657,7 @@ fmuls:
 0c000?1001 -> indirect jumps
 0ddddd1010 -> decrement rd
 00kkkk1011 -> DES
-0kkkkk11ck -> abs jumps 
+0kkkkk11ck -> abs jumps
 1sKKddKKKK -> adiw/sbiw
 */
 .p2align 3
@@ -910,7 +910,7 @@ decode_table:
 /* 1111 11 */ .long e_sbrcs
 
 subdecode_table:
-/* 0000 */ .long f_com 
+/* 0000 */ .long f_com
 /* 0001 */ .long f_neg
 /* 0010 */ .long f_swap
 /* 0011 */ .long f_inc
@@ -929,7 +929,7 @@ subdecode_table:
 
 .bss
 
-avr_cycle: 
+avr_cycle:
     .long 0
     .long 0
 avr_IP:    .long 0
@@ -966,7 +966,7 @@ X    = avr_ADDR+26
 1001 y+
 1010 -y
 
-1100 x 
+1100 x
 1101 x+
 1110 -x
 
