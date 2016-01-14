@@ -105,22 +105,23 @@ flagcvt:
     mov [avr_SREG], al
     .exitm
     .endif
-    push edx
-    mov edx, ebx
-    and edx, 0x8d1
-    lea eax, [edx*8+edx]
-    and eax, 0x4e10
-    xor dl, ah
-    lea eax, [eax*2+eax] # BUG?
+    mov eax, ebx
+    and eax, 0x8d1
+    lea eax, [eax*8+eax]
+    and eax, 0x4e11
+    or ah, al
+    and ax, 0x01FFE
+    add ah, al
+    mov al, ah
+    add al, al
     xor al, ah
-    and edx, 0xF
-    and eax, 0xC
-    lea edx, [eax*2+edx]
+    add al, al
+    and al, 0x10
+    or ah, al
     mov al, [avr_SREG]
     and al, 0xC0
-    or al, dl
+    or al, ah
     mov [avr_SREG], al
-    pop edx
 .endm
 
 .macro imm
@@ -333,13 +334,13 @@ skipins:
     inc edi
     # test if we are a LDS/STS instr
     and ax, 0xFC0F
-    cmp ax, 0x9000 # BUG cmp -> sub
+    sub ax, 0x9000
     sub ax, 1
     adc edi, 0
     # test if we are long jump/call
     and dx, 0xFE0C
-    cmp dx, 0x940C # BUG cmp -> sub
-    sub ax, 1
+    sub dx, 0x940C
+    sub dx, 1
     adc edi, 0
     sub esi, edi
     neg esi
