@@ -536,10 +536,10 @@ e_lpm:
     adc dword ptr [avr_cycle+4], 0
     movzx esi, word ptr [Z]
     mov al, [avr_FLASH+esi]
-    mov [avr_ADDR+edx], al
     bt ecx, 0
     adc esi, 0
     mov [Z], si
+    mov [avr_ADDR+edx], al
     resume
 /*
 sd dddd 0000 LDS
@@ -574,6 +574,7 @@ ldd_std:
     and esi, 0x3
     add esi, eax
     avr_flags ebx
+    xor eax, eax # TODO make this cleaner
     btr ecx, 3
     setnc al
     mov ax, [Y+eax*2]
