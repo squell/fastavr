@@ -943,8 +943,8 @@ avr_IP:    .long 0
 avr_ADDR:  .space 0x10000
 avr_FLASH: .space 0x10000
 
-avr_SREG = avr_ADDR+0x3F
-avr_SP   = avr_ADDR+0x3D
+avr_SREG = avr_ADDR+0x5F
+avr_SP   = avr_ADDR+0x5D
 
 Z    = avr_ADDR+30
 Y    = avr_ADDR+28
