@@ -404,11 +404,15 @@ e_bst_bld:
     jnz e_bst
 e_bld:
     mov al, [avr_SREG]
+    and cl, 7
     shr al, 6
     and al, 1
-    and cl, 7
-    sal al, cl
-    or [avr_ADDR+edx], al
+    xor ax, 0x0101
+    sal eax, cl
+    mov cl, [avr_ADDR+edx]
+    or cl, ah
+    xor cl, al
+    mov [avr_ADDR+edx], cl
     resume
 .p2align 3
 e_bst:
@@ -417,7 +421,10 @@ e_bst:
     shr al, cl
     and al, 1
     sal al, 6
-    or [avr_SREG], al
+    mov cl, [avr_SREG]
+    and cl, 0xBF
+    or cl, al
+    mov [avr_SREG], cl
     resume
 
 .p2align 3   # TODO test
