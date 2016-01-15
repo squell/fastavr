@@ -147,6 +147,7 @@ flagcvt:
 
 .if 0
 pusha
+avr_flags ebx
 dec edi
 push edi
 call avr_debug
@@ -381,10 +382,10 @@ e_brbc:
 .p2align 3
 rcall:
     movzx edx, word ptr [avr_SP]
-    mov [avr_ADDR+edx], di
+    mov [avr_ADDR+edx-1], di
     sub edx, 2
     mov [avr_SP], dx
-    # TODO: cycles on xmega/reduced core tinyavr/22bit IP?
+    # TODO: 22bit IP? cycles on xmega/reduced core tinyavr/22bit IP?
 
 .p2align 3
 rjmp:
@@ -732,8 +733,8 @@ f_ret:
     shl dl, 7
     or [avr_SREG], dl    # set the IF in SREG if RETI
     movzx eax, word ptr [avr_SP]
+    mov di, [avr_ADDR+eax+1]
     add eax, 2
-    mov di, [avr_ADDR+eax]
     mov [avr_SP], ax
 
     add dword ptr [avr_cycle], 3
@@ -802,9 +803,9 @@ f_dec:
 f_ind_jump:
     movzx eax, word ptr [avr_SP]
     bt edx, 4    # if icall, modify stack
-    mov si, [avr_ADDR+eax]
+    mov si, [avr_ADDR+eax-1]
     cmovc esi, edi
-    mov [avr_ADDR+eax], si
+    mov [avr_ADDR+eax-1], si
     shr edx, 3
     sub eax, edx
     mov [avr_SP], ax
@@ -824,11 +825,12 @@ f_abs_jump:
     rcl edx, 1
     shl edx, 16
     mov dx, [avr_FLASH+edi*2]
+    inc edi
 
     shr ecx, 1
-    mov si, [avr_ADDR+eax]
+    mov si, [avr_ADDR+eax-1]
     cmovc esi, edi
-    mov [avr_ADDR+eax], si
+    mov [avr_ADDR+eax-1], si
     lea esi, [eax-2]
     cmovc eax, esi
     mov [avr_SP], ax
