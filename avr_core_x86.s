@@ -382,7 +382,9 @@ e_brbc:
 .p2align 3
 rcall:
     movzx edx, word ptr [avr_SP]
-    mov [avr_ADDR+edx-1], di
+    mov cx, di
+    rol cx, 8
+    mov [avr_ADDR+edx-1], cx
     sub edx, 2
     mov [avr_SP], dx
     # TODO: 22bit IP? cycles on xmega/reduced core tinyavr/22bit IP?
@@ -734,6 +736,7 @@ f_ret:
     or [avr_SREG], dl    # set the IF in SREG if RETI
     movzx eax, word ptr [avr_SP]
     mov di, [avr_ADDR+eax+1]
+    rol di, 8
     add eax, 2
     mov [avr_SP], ax
 
@@ -802,6 +805,7 @@ f_dec:
 # TODO: does notsupport EICALL/EIJMP
 f_ind_jump:
     movzx eax, word ptr [avr_SP]
+    rol di, 8
     bt edx, 4    # if icall, modify stack
     mov si, [avr_ADDR+eax-1]
     cmovc esi, edi
@@ -826,6 +830,7 @@ f_abs_jump:
     shl edx, 16
     mov dx, [avr_FLASH+edi*2]
     inc edi
+    rol di, 8
 
     shr ecx, 1
     mov si, [avr_ADDR+eax-1]
