@@ -63,11 +63,10 @@ SF = 1<<7
 ZF = 1<<6
 CF = 1<<0
 
-FASTRESUME=0
+FASTRESUME=1
 FASTFLAG=1
-PAR=1
-PAR_LDS=PAR
-PAR_STK=PAR
+PAR_LDS=0
+PAR_STK=1
 
 .if FASTFLAG
 .data
@@ -956,7 +955,7 @@ avr_cycle:
     .long 0
 avr_IP:    .long 0
 avr_ADDR:  .space 0x10000
-avr_FLASH: .space 0x10000
+avr_FLASH: .space 0x20000
 
 avr_SREG = avr_ADDR+0x5F
 avr_SP   = avr_ADDR+0x5D
