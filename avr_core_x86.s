@@ -60,10 +60,12 @@ SF = 1<<7
 ZF = 1<<6
 CF = 1<<0
 
+ADDRESS_LINES=14
 FASTRESUME=1
 FASTFLAG=1
 PAR_LDS=0
 PAR_STK=1
+PAR_SBIW=0
 
 .if FASTFLAG
 .data
@@ -141,6 +143,7 @@ flagcvt:
 .endm
 
 .macro decode_next_instr
+    and edi, (1<<ADDRESS_LINES)-1
     movzx eax, word ptr [avr_FLASH+edi*2]
 
     # begin decoding the r/d, so the pipeline has something to do while jumping
@@ -726,28 +729,42 @@ e_1op_misc:
 
 # this is a bit painful to write without using any further aconditional jumps
 e_sbiw_adiw:
+    add dword ptr [avr_cycle], 1
+    adc dword ptr [avr_cycle+4], 0
     mov eax, edx
     and eax, 0xC
     and edx, 0x13
     lea ecx, [eax*4+ecx]
     btr edx, 4           # CF set -> sbiw instruction
-    setc al
     mov si, [avr_ADDR+edx*2+24]
+.if PAR_SBIW
+    setc al
     sub si, cx
     pushf
     add cx, [avr_ADDR+edx*2+24]
     pushf
-    bt eax, 0
+    test eax, eax
     mov eax, [esp+eax*4] # load the appropriate flags in eax
-    cmovc ecx, esi       # and the appropriate result in ecx
+    cmovnz ecx, esi      # and the appropriate result in ecx
     mov [avr_ADDR+edx*2+24], cx
     add esp, 8
     and ebx, ~(SF+OF+ZF+CF)
     and eax, SF+OF+ZF+CF
     or ebx, eax
-    add dword ptr [avr_cycle], 1
-    adc dword ptr [avr_cycle+4], 0
     resume
+.else
+    jc 1f
+    add si, cx
+    mov [avr_ADDR+edx*2+24], si
+    pushf
+    pop ebx
+    resume
+1:  sub si, cx
+    mov [avr_ADDR+edx*2+24], si
+    pushf
+    pop ebx
+    resume
+.endif
 
 .p2align 3
 f_flag_misc:
