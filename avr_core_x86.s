@@ -125,13 +125,13 @@ flagcvt:
 
 # converts the given flags (in edx) back to x86 FLAGS (in ebx)
 .macro load_flags ebx
-    mov dh, dl
-    mov ecx, edx
+    mov ah, al
+    mov ecx, eax
     shl cl, 2
     shr ecx, 3
     and ecx, 0xF0
-    and edx, 0xF0F
-    lea ebx, [ecx+edx]
+    and eax, 0xF0F
+    lea ebx, [ecx+eax]
 .endm
 
 .macro imm
@@ -413,7 +413,6 @@ rjmp:
 
 .p2align 3
 e_bst_bld:
-    #avr_flags ebx
     test cl, 0x10
     jnz e_bst
 e_bld:
@@ -443,7 +442,7 @@ e_bst:
 
 .p2align 3
 io_in1:
-    avr_flags ebx      # might be read from
+    avr_flags ebx      # might read sreg
     mov al, [avr_IO+ecx+0x20]
     mov [avr_ADDR+edx], al
     resume
@@ -455,10 +454,10 @@ io_in:
 
 .p2align 3
 io_out1:
-    avr_flags ebx      # should save ebx, pessimistic
+    avr_flags ebx      # might modify sreg
     mov al, [avr_ADDR+edx]
     mov [avr_IO+ecx+0x20], al
-    mov dl, [avr_SREG] # might have been written, TODO URGENT pessimistic
+    mov al, [avr_SREG]
     load_flags ebx
     resume
 .p2align 3
@@ -498,7 +497,6 @@ io_bit_skip:
 # with tweaks added to support lpm, lds and pop/push
 .p2align 3
 ld_st:
-    avr_flags ebx # pessimistic
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
     mov eax, ecx
@@ -559,17 +557,30 @@ ld_st:
 
     dec word ptr [avr_SP]  # final stacktweak
 
-    bt ecx, 4
+    # check if we are accessing the flags
+    cmp esi, avr_SREG - avr_ADDR
+    je conflict_sreg
+
     # if CF, store, otherwise, load
+    bt ecx, 4
     mov al, [avr_ADDR+esi]
     mov cl, [avr_ADDR+edx]
     cmovc eax, ecx
     cmovnc ecx, eax
     mov [avr_ADDR+esi], al
     mov [avr_ADDR+edx], cl
+    resume
 
-# URGENT TODO: this is really pessimistic
-    mov dl, [avr_SREG]
+# a load or store from sreg
+conflict_sreg:
+    avr_flags ebx
+    bt ecx, 4
+    mov al, [avr_ADDR+esi]
+    mov cl, [avr_ADDR+edx]
+    cmovc eax, ecx
+    cmovnc ecx, eax
+    mov [avr_ADDR+esi], al
+    mov [avr_ADDR+edx], cl
     load_flags ebx
     resume
 
@@ -616,17 +627,19 @@ ldd_std:
     and eax, 0xF
     and esi, 0x3
     add esi, eax
-    avr_flags ebx # pessimistic
-    xor eax, eax # TODO make this cleaner
     btr ecx, 3
     setnc al
     mov ax, [Y+eax*2]
     btr ecx, 4
-    lea ecx, [ecx+eax]
-    lea esi, [esi*4+ecx]
+    lea eax, [ecx+eax]
+    lea esi, [esi*4+eax]
     # eax = use Z?
     # edx = reg
     # esi = index
+
+    # check if we are accessing the flags
+    lea ecx, [esi-(avr_SREG - avr_ADDR)]
+    jecxz conflict_sreg_2
 
     # don't use jumps, just read the locations
     # if CF, store, otherwise, load
@@ -636,11 +649,11 @@ ldd_std:
     cmovnc ecx, eax
     mov [avr_ADDR+esi], al
     mov [avr_ADDR+edx], cl
-
-# URGENT TODO: this is really pessimistic
-    mov dl, [avr_SREG]
-    load_flags ebx
     resume
+
+conflict_sreg_2:
+    or ecx, 1<<4
+    jmp conflict_sreg
 
 .p2align 3
 umult:
@@ -778,9 +791,9 @@ f_set_clr:
     adc edx, 0x100
     shl edx, cl
     not dl
-    or dh, al  # al contains avr_SREG
-    and dl, dh
-    mov [avr_SREG], dl
+    or al, dh  # al contains avr_SREG
+    and al, dl
+    mov [avr_SREG], al
     load_flags ebx
     resume
 
