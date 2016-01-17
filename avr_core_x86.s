@@ -30,9 +30,6 @@
 .global avr_SP
 .global avr_SREG
 
-.extern avr_io_in
-.extern avr_io_out
-
 .text
 
 .macro debug src
@@ -441,36 +438,64 @@ e_bst:
     mov [avr_SREG], cl
     resume
 
-.p2align 3   # TODO test
+.p2align 3
 io_in1:
-    add cl, 32
+    avr_flags ebx      # might be read from
+    mov al, [avr_IO+ecx+0x20]
+    mov [avr_ADDR+edx], al
+    resume
 .p2align 3
 io_in:
-    push edx
-    push ecx
-    call avr_io_in
-    pop ecx
-    pop edx
+    mov al, [avr_IO+ecx]
     mov [avr_ADDR+edx], al
     resume
 
 .p2align 3
 io_out1:
-    add cl, 32
+    avr_flags ebx      # should save ebx, pessimistic
+    mov al, [avr_ADDR+edx]
+    mov [avr_IO+ecx+0x20], al
+    mov dl, [avr_SREG] # might have been written, TODO URGENT pessimistic
+    load_flags ebx
+    resume
 .p2align 3
 io_out:
-    movzx eax, byte ptr [avr_ADDR+edx]
-    push eax
-    push ecx
-    call avr_io_out
-    add esp, 4
+    mov al, [avr_ADDR+edx]
+    mov [avr_IO+ecx], al
+    resume
+
+# 1001 1000 AAAA Abbb CBI
+# 1001 1010 AAAA Abbb SBI
+# 1001 1001 AAAA Abbb SBIC
+# 1001 1011 AAAA Abbb SBIS
+.p2align 3
+io_bit:
+    btr ecx, 3
+    rcl edx, 1
+    btr edx, 5 # CF <-> skip-ins
+    jc io_bit_skip
+    add dword ptr [avr_cycle], 1
+    adc dword ptr [avr_cycle+4], 0
+    btr ecx, 4 # CF = set
+    jc 1f
+    lock btr [avr_IO+edx], ecx
+    resume
+1:  lock bts [avr_IO+edx], ecx
+    resume
+
+io_bit_skip:
+    btr ecx, 4 # CF = skip if set
+    setc al
+    bt [avr_IO+edx], ecx
+    sbb al, 0  # ZF = condition matched
+    jz skipins
     resume
 
 # this code is optimized for the 'happy path' (ld/st)
 # with tweaks added to support lpm, lds and pop/push
 .p2align 3
 ld_st:
-    avr_flags ebx
+    avr_flags ebx # pessimistic
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
     mov eax, ecx
@@ -539,6 +564,10 @@ ld_st:
     cmovnc ecx, eax
     mov [avr_ADDR+esi], al
     mov [avr_ADDR+edx], cl
+
+# URGENT TODO: this is really pessimistic
+    mov dl, [avr_SREG]
+    load_flags ebx
     resume
 
 # TODO: only LPM and LPM+  implemented yet
@@ -584,7 +613,7 @@ ldd_std:
     and eax, 0xF
     and esi, 0x3
     add esi, eax
-    avr_flags ebx
+    avr_flags ebx # pessimistic
     xor eax, eax # TODO make this cleaner
     btr ecx, 3
     setnc al
@@ -604,6 +633,10 @@ ldd_std:
     cmovnc ecx, eax
     mov [avr_ADDR+esi], al
     mov [avr_ADDR+edx], cl
+
+# URGENT TODO: this is really pessimistic
+    mov dl, [avr_SREG]
+    load_flags ebx
     resume
 
 .p2align 3
@@ -917,7 +950,7 @@ decode_table:
 /* 1000 11 */ .long ldd_std
 /* 1001 00 */ .long ld_st
 /* 1001 01 */ .long e_1op_misc
-/* 1001 10 */ .long unhandled # I/O space bit operations: CBI/SBI/SBIC/SBIS
+/* 1001 10 */ .long io_bit
 /* 1001 11 */ .long umult
 /* 1010 00 */ .long ldd_std
 /* 1010 01 */ .long ldd_std
@@ -971,8 +1004,9 @@ avr_IP:    .long 0
 avr_ADDR:  .space 0x10000
 avr_FLASH: .space 0x20000
 
-avr_SREG = avr_ADDR+0x5F
-avr_SP   = avr_ADDR+0x5D
+avr_IO   = avr_ADDR+0x20
+avr_SREG = avr_IO+0x3F
+avr_SP   = avr_IO+0x3D
 
 Z    = avr_ADDR+30
 Y    = avr_ADDR+28
