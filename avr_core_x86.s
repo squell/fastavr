@@ -89,7 +89,8 @@ flagcvt:
 .text
 .endif
 
-# TODO: i think i handle S incorrectly ?
+# TODO: this emulated cpu doesn't have an actual "sign" flag; this means
+# that writes to it (via SES/CLS or SBI/CBI/OUT/ST) get ignored.
 # converts ebx from x86 FLAGS to avr avr_SREG -> eax
 .macro avr_flags ebx
     .if FASTFLAG
@@ -121,6 +122,17 @@ flagcvt:
     and al, 0xC0
     or al, ah
     mov [avr_SREG], al
+.endm
+
+# converts the given flags (in edx) back to x86 FLAGS (in ebx)
+.macro load_flags ebx
+    mov dh, dl
+    mov ecx, edx
+    shl cl, 2
+    shr ecx, 3
+    and ecx, 0xF0
+    and edx, 0xF0F
+    lea ebx, [ecx+edx]
 .endm
 
 .macro imm
@@ -710,6 +722,7 @@ f_flag_misc:
     btr edx, 4
     jc f_ret
 f_set_clr:
+    mov ecx, edx
     xor edx, edx
     btr ecx, 3 # if CF, clear, otherwise set flag
     adc edx, 0x100
@@ -718,6 +731,7 @@ f_set_clr:
     or dh, al  # al contains avr_SREG
     and dl, dh
     mov [avr_SREG], dl
+    load_flags ebx
     resume
 
 .p2align 3
