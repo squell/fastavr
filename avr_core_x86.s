@@ -800,9 +800,13 @@ f_misc:
     jmp exit
 
 .p2align 3
+# TODO: only LPM implemented; add SPM
 f_lpm_spm_r0:
-#TODO: spm/lpm r0 family; not sure how yet
-    jmp unhandled
+    add dword ptr [avr_cycle], 1
+    adc dword ptr [avr_cycle+4], 0
+    xor edx, edx
+    lea ecx, [ecx*2-4] # 100->100, 101->110, so (e)lpm->(e)lpm r0
+    jmp e_lpm
 
 .p2align 3
 f_com:
