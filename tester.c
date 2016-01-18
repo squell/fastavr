@@ -7,7 +7,7 @@ extern unsigned char avr_ADDR[];
 extern unsigned char avr_FLASH[];
 extern unsigned short int avr_SP;
 extern unsigned char avr_SREG;
-extern void avr_run(void);
+extern int avr_run(void);
 
 void avr_debug(unsigned long ip)
 {
@@ -21,8 +21,6 @@ void avr_debug(unsigned long ip)
     printf("\n");
 }
 
-extern void avr_run(void);
-
 int main(int argc, char **argv)
 {
     int i;
@@ -31,7 +29,7 @@ int main(int argc, char **argv)
     //for(i=0; i < n; i++) printf("%02x ", avr_FLASH[i]);
     printf("\n");
     avr_reset();
-    avr_run();
+    while(! avr_run() );
     //printf("%lld\n", avr_cycle);
     avr_debug(-1);
 }

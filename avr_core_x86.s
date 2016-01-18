@@ -855,8 +855,8 @@ f_misc:
     test edx, 0x4
     jnz f_lpm_spm_r0
     mov esi, edx
-    cmp edx, 2
-    jne exit
+    inc esi
+    jnp exit
 
     # watchdog reset
     mov eax, [avr_cycle]
@@ -975,6 +975,7 @@ interrupt:
     mov [avr_ADDR+edx-1], cx
     sub edx, 2
     mov [avr_SP], dx
+    xor esi, esi
     jmp exit
 .endif
 
@@ -983,7 +984,7 @@ unhandled:
     dec esi
     mov si, [avr_FLASH+(edi-1)*2] # store illegal opcode in lower word
 
-# return status: 0 = sleep, 1 = break, 2 = interrupted, else: unhandled
+# return status: 0 = interrupted, 1 = sleep, 2 = break, else: unhandled
 exit:
     # wrap-up
     avr_flags ebx
