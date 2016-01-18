@@ -28,8 +28,9 @@ RAMEND   = 4096 + 0x100 - 1
 .global avr_reset
 .global avr_run
 .global avr_step
-.global avr_IP
+.global avr_PC
 .global avr_ADDR
+.global avr_IO
 .global avr_FLASH
 .global avr_cycle
 .global avr_last_wdr
@@ -974,6 +975,7 @@ interrupt:
 1:  add dword ptr [avr_cycle], 3
     adc dword ptr [avr_cycle+4], 0
     dec edi
+    mov [avr_INTR], esi
     movzx edx, word ptr [avr_SP]
     mov cx, di
     rol cx, 8
@@ -993,6 +995,7 @@ redo_exit:
     sub dword ptr [avr_cycle], 1
     sbb dword ptr [avr_cycle+4], 0
     dec edi
+    mov [avr_INTR], esi
 
 # return status: 0 = interrupted, 1 = sleep, 2 = break, else: unhandled
 exit:
