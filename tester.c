@@ -7,7 +7,9 @@ extern unsigned char avr_ADDR[];
 extern unsigned char avr_FLASH[];
 extern unsigned short int avr_SP;
 extern unsigned char avr_SREG;
+extern void avr_reset(void);
 extern int avr_run(void);
+extern int avr_step(void);
 
 void avr_debug(unsigned long ip)
 {

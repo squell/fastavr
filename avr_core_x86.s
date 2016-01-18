@@ -27,6 +27,7 @@ RAMEND   = 4096 + 0x100 - 1
 
 .global avr_reset
 .global avr_run
+.global avr_step
 .global avr_IP
 .global avr_ADDR
 .global avr_FLASH
@@ -152,7 +153,7 @@ flagcvt:
     and edx, 0xF
 .endm
 
-.macro decode_next_instr
+.macro decode_next_instr service_ints=INTR
     and edi, FLASHEND
     movzx eax, word ptr [avr_FLASH+edi*2]
 
@@ -178,7 +179,7 @@ popa
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
     inc edi
-.if INTR
+.if service_ints
     mov ebp, [avr_INTR]
     jmp [decode_table+eax*4+ebp]
 .else
@@ -263,7 +264,8 @@ avr_run:
     push edi
     push esi
 
-    xor ebx, ebx
+    mov al, [avr_SREG]
+    load_flags ebx
 
     mov edi, [avr_PC]
     jmp fetch
@@ -963,6 +965,9 @@ f_abs_jump:
 .if INTR
 .p2align 3
 interrupt:
+    xor esi, esi
+    cmp [avr_PC], esi               # were we in single-step mode?
+    jl redo_exit
     btr dword ptr [avr_SREG], 7     # if IF is clear, ignore the interrupt
     jc 1f
     jmp [decode_table+eax*4]
@@ -975,7 +980,6 @@ interrupt:
     mov [avr_ADDR+edx-1], cx
     sub edx, 2
     mov [avr_SP], dx
-    xor esi, esi
     jmp exit
 .endif
 
@@ -983,6 +987,12 @@ unhandled:
     xor esi, esi
     dec esi
     mov si, [avr_FLASH+(edi-1)*2] # store illegal opcode in lower word
+
+.p2align 3
+redo_exit:
+    sub dword ptr [avr_cycle], 1
+    sbb dword ptr [avr_cycle+4], 0
+    dec edi
 
 # return status: 0 = interrupted, 1 = sleep, 2 = break, else: unhandled
 exit:
@@ -995,6 +1005,23 @@ exit:
     pop ebx
     pop ebp
     ret
+
+.if INTR
+.p2align 3
+avr_step:
+    push ebp
+    push ebx
+    push edi
+    push esi
+
+    mov al, [avr_SREG]
+    load_flags ebx
+
+    mov edi, [avr_PC]
+    mov dword ptr [avr_PC], -1
+    mov byte ptr [avr_INT], 1
+    decode_next_instr 0
+.endif
 
 .data
 
