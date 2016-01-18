@@ -22,11 +22,17 @@
 .intel_syntax noprefix
 .altmacro
 
+FLASHEND = 0x7FFF
+RAMEND   = 4096 + 0x100 - 1
+
+.global avr_reset
 .global avr_run
 .global avr_IP
 .global avr_ADDR
 .global avr_FLASH
 .global avr_cycle
+.global avr_last_wdr
+.global avr_INT
 .global avr_SP
 .global avr_SREG
 
@@ -42,6 +48,10 @@ pop eax
 popf
 popa
 .endm
+
+.if (FLASHEND+1) & FLASHEND
+.error "AVR requested whose FLASH memory is not a power of two"
+.endif
 
 /* on the avr:
 IF = 1<<7
@@ -60,7 +70,7 @@ SF = 1<<7
 ZF = 1<<6
 CF = 1<<0
 
-ADDRESS_LINES=14
+INTR=1
 FASTRESUME=1
 FASTFLAG=1
 PAR_LDS=0
@@ -143,7 +153,7 @@ flagcvt:
 .endm
 
 .macro decode_next_instr
-    and edi, (1<<ADDRESS_LINES)-1
+    and edi, FLASHEND
     movzx eax, word ptr [avr_FLASH+edi*2]
 
     # begin decoding the r/d, so the pipeline has something to do while jumping
@@ -168,7 +178,12 @@ popa
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
     inc edi
+.if INTR
+    mov ebp, [avr_INTR]
+    jmp [decode_table+eax*4+ebp]
+.else
     jmp [decode_table+eax*4]
+.endif
 .endm
 
 .macro resume
@@ -232,6 +247,16 @@ popa
 .endm
 
 .p2align 3
+avr_reset:
+    xor eax, eax
+    mov [avr_PC], eax
+    mov [avr_cycle], eax
+    mov [avr_cycle+4], eax
+    mov [avr_last_wdr], eax
+    mov word ptr [avr_SP], RAMEND
+    ret
+
+.p2align 3
 avr_run:
     push ebp
     push ebx
@@ -240,7 +265,7 @@ avr_run:
 
     xor ebx, ebx
 
-    mov edi, [avr_IP]
+    mov edi, [avr_PC]
     jmp fetch
 
 .p2align 3
@@ -824,10 +849,19 @@ f_ret:
 .p2align 3
 f_misc:
 # treat sleep/break and wdr as exit conditions; let the caller decide what to do
+# 000  -> sleep
+# 001  -> break
+# 010  -> wdr
     test edx, 0x4
     jnz f_lpm_spm_r0
     mov esi, edx
-    jmp exit
+    cmp edx, 2
+    jne exit
+
+    # watchdog reset
+    mov eax, [avr_cycle]
+    mov [avr_last_wdr], eax
+    resume
 
 .p2align 3
 # TODO: only LPM implemented; add SPM
@@ -926,15 +960,34 @@ f_abs_jump:
     adc dword ptr [avr_cycle+4], 0
     resume
 
+.if INTR
+.p2align 3
+interrupt:
+    btr dword ptr [avr_SREG], 7     # if IF is clear, ignore the interrupt
+    jc 1f
+    jmp [decode_table+eax*4]
+1:  add dword ptr [avr_cycle], 3
+    adc dword ptr [avr_cycle+4], 0
+    dec edi
+    movzx edx, word ptr [avr_SP]
+    mov cx, di
+    rol cx, 8
+    mov [avr_ADDR+edx-1], cx
+    sub edx, 2
+    mov [avr_SP], dx
+    jmp exit
+.endif
+
 unhandled:
     xor esi, esi
     dec esi
     mov si, [avr_FLASH+(edi-1)*2] # store illegal opcode in lower word
 
+# return status: 0 = sleep, 1 = break, 2 = interrupted, else: unhandled
 exit:
     # wrap-up
     avr_flags ebx
-    mov [avr_IP], edi
+    mov [avr_PC], edi
     mov eax, esi
     pop esi
     pop edi
@@ -1010,6 +1063,9 @@ decode_table:
 /* 1111 01 */ .long e_brbc
 /* 1111 10 */ .long e_bst_bld
 /* 1111 11 */ .long e_sbrcs
+.rept INTR*64
+/* INT     */ .long interrupt
+.endr
 
 subdecode_table:
 /* 0000 */ .long f_com
@@ -1031,13 +1087,22 @@ subdecode_table:
 
 .bss
 
+.p2align 3
 avr_cycle:
     .long 0
     .long 0
-avr_IP:    .long 0
-avr_ADDR:  .space 0x10000
-avr_FLASH: .space 0x20000
+avr_INTR:
+    .long 0
+avr_ADDR:
+    .space 0x10000
+avr_FLASH:
+    .space 0x20000
+avr_PC:
+    .long 0
+avr_last_wdr:
+    .long 0
 
+avr_INT  = avr_INTR+1
 avr_IO   = avr_ADDR+0x20
 avr_SREG = avr_IO+0x3F
 avr_SP   = avr_IO+0x3D
