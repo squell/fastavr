@@ -26,6 +26,7 @@ SRAM     = 8192
 FLASHEND = 0x1FFFF
 IOEND    = 0x1FF
 RAMEND   = SRAM + IOEND
+BIGPC    = FLASHEND > 0xFFFF
 
 .global avr_reset
 .global avr_run
@@ -173,7 +174,6 @@ flagcvt:
 .if 0
 pusha
 avr_flags ebx
-dec edi
 push edi
 call avr_debug
 pop eax
@@ -423,12 +423,18 @@ e_brbc:
 .p2align 3
 rcall:
     movzx edx, word ptr [avr_SP]
-    mov cx, di
+    mov ecx, edi
+.if BIGPC
+    bswap ecx
+    mov cl, [avr_ADDR+edx-3]   # keep the byte at SP
+    mov [avr_ADDR+edx-3], ecx
+    sub edx, 3
+.else
     rol cx, 8
     mov [avr_ADDR+edx-1], cx
     sub edx, 2
+.endif
     mov [avr_SP], dx
-    # TODO: 22bit IP? cycles on xmega/reduced core tinyavr/22bit IP?
 
 .p2align 3
 rjmp:
@@ -437,7 +443,13 @@ rjmp:
     sar edx, 4+16
     lea edi, [edi+edx]
     shr eax, 3
-    adc dword ptr [avr_cycle], 1   
+.if BIGPC
+    setc al
+    lea eax, [eax*2+1]
+    add dword ptr [avr_cycle], eax
+.else
+    adc dword ptr [avr_cycle], 1
+.endif
     adc dword ptr [avr_cycle+4], 0
     resume
 
@@ -619,7 +631,7 @@ e_lpm:
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
     movzx esi, word ptr [Z]
-.if FLASHEND >= 0x10000
+.if BIGPC
     # note: RAMPZ is not incremented, as it isn't in actual mcu's
     mov al, [RAMPZ]
     shl eax, 16
@@ -851,12 +863,18 @@ f_ret:
     shl dl, 7
     or [avr_SREG], dl    # set the IF in SREG if RETI
     movzx eax, word ptr [avr_SP]
+.if BIGPC
+    mov edi, [avr_ADDR+eax] # the junk read in the LSB is ignored later
+    bswap edi
+    add eax, 3
+.else
     mov di, [avr_ADDR+eax+1]
     rol di, 8
     add eax, 2
+.endif
     mov [avr_SP], ax
 
-    add dword ptr [avr_cycle], 3
+    add dword ptr [avr_cycle], 3-BIGPC
     adc dword ptr [avr_cycle+4], 0
     resume
 
@@ -934,29 +952,39 @@ f_dec:
 .p2align 3
 f_ind_jump:
     movzx eax, word ptr [avr_SP]
-    rol di, 8
+.if BIGPC
+    bswap edi
     bt edx, 4    # if icall, modify stack
-    mov si, [avr_ADDR+eax-1]
-    cmovc esi, edi
-    mov [avr_ADDR+eax-1], si
-.if FLASHEND >= 0x10000
+    mov ecx, [avr_ADDR+eax-3]
+    cmovc ecx, edi
+    mov cl, [avr_ADDR+eax-3]
+    mov [avr_ADDR+eax-3], ecx
+
     xor edi, edi
     mov cl, [EIND]
     shl ecx, 16
     test edx, 1
     cmovnz edi, ecx
+    or dl, 8     # make sure 3 bytes are subtracted
+.else
+    rol di, 8
+    bt edx, 4    # if icall, modify stack
+    mov si, [avr_ADDR+eax-1]
+    cmovc esi, edi
+    mov [avr_ADDR+eax-1], si
 .endif
     shr edx, 3
     sub eax, edx
     mov [avr_SP], ax
 
-.if FLASHEND >= 0x10000
+.if BIGPC
     mov di, word ptr [Z]
+    add dword ptr [avr_cycle], edx
 .else
     movzx edi, word ptr [Z]
-.endif
     shr edx, 2
     adc dword ptr [avr_cycle], 1
+.endif
     adc dword ptr [avr_cycle+4], 0
     resume
 
@@ -970,18 +998,37 @@ f_abs_jump:
     shl edx, 16
     mov dx, [avr_FLASH+edi*2]
     inc edi
+.if BIGPC
+    bswap edi
+.else
     rol di, 8
+.endif
 
     shr ecx, 1
+.if BIGPC
+    mov ecx, [avr_ADDR+eax-3]
+    cmovc ecx, edi
+    mov cl, [avr_ADDR+eax-3]
+    mov [avr_ADDR+eax-3], ecx
+.else
     mov si, [avr_ADDR+eax-1]
     cmovc esi, edi
     mov [avr_ADDR+eax-1], si
-    lea esi, [eax-2]
+.endif
+    lea esi, [eax-2+BIGPC]
     cmovc eax, esi
     mov [avr_SP], ax
 
     mov edi, edx
+.if BIGPC
+    mov al, -1
+    adc al, 0
+    adc al, 3
+    movzx eax, al
+    add dword ptr [avr_cycle], eax
+.else
     adc dword ptr [avr_cycle], 2
+.endif
     adc dword ptr [avr_cycle+4], 0
     resume
 
@@ -1144,15 +1191,15 @@ subdecode_table:
 avr_cycle:
     .long 0
     .long 0
+avr_last_wdr:
+    .long 0
 avr_INTR:
     .long 0
 avr_ADDR:
     .space 0x10000
 avr_FLASH:
-    .space (FLASHEND+1)<<1
+    .space 2<<22
 avr_PC:
-    .long 0
-avr_last_wdr:
     .long 0
 
 avr_INT  = avr_INTR+1
