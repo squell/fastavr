@@ -22,8 +22,10 @@
 .intel_syntax noprefix
 .altmacro
 
-FLASHEND = 0x7FFF
-RAMEND   = 4096 + 0x100 - 1
+SRAM     = 8192
+FLASHEND = 0x1FFFF
+IOEND    = 0x1FF
+RAMEND   = SRAM + IOEND
 
 .global avr_reset
 .global avr_run
@@ -612,11 +614,20 @@ conflict_sreg:
     load_flags ebx
     resume
 
-# TODO: only LPM and LPM+  implemented yet
+# TODO: only (E)LPM and (E)LPM+  implemented yet
 e_lpm:
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
     movzx esi, word ptr [Z]
+.if FLASHEND >= 0x10000
+    # note: RAMPZ is not incremented, as it isn't in actual mcu's
+    mov al, [RAMPZ]
+    shl eax, 16
+    add eax, esi
+    test ecx, 2
+    cmovnz esi, eax
+.endif
+    and esi, (FLASHEND<<1)+1
     mov al, [avr_FLASH+esi]
     bt ecx, 0
     adc esi, 0
@@ -871,8 +882,8 @@ f_misc:
 f_lpm_spm_r0:
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
+    lea ecx, [edx*2-4] # 100->100, 101->110, so (e)lpm->(e)lpm r0
     xor edx, edx
-    lea ecx, [ecx*2-4] # 100->100, 101->110, so (e)lpm->(e)lpm r0
     jmp e_lpm
 
 .p2align 3
@@ -919,8 +930,8 @@ f_inc:
 f_dec:
     direct1 dec, OF+SF+ZF
 
+# 0c 000e eicall
 .p2align 3
-# TODO: does notsupport EICALL/EIJMP
 f_ind_jump:
     movzx eax, word ptr [avr_SP]
     rol di, 8
@@ -928,11 +939,22 @@ f_ind_jump:
     mov si, [avr_ADDR+eax-1]
     cmovc esi, edi
     mov [avr_ADDR+eax-1], si
+.if FLASHEND >= 0x10000
+    xor edi, edi
+    mov cl, [EIND]
+    shl ecx, 16
+    test edx, 1
+    cmovnz edi, ecx
+.endif
     shr edx, 3
     sub eax, edx
     mov [avr_SP], ax
 
+.if FLASHEND >= 0x10000
+    mov di, word ptr [Z]
+.else
     movzx edi, word ptr [Z]
+.endif
     shr edx, 2
     adc dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
@@ -1127,7 +1149,7 @@ avr_INTR:
 avr_ADDR:
     .space 0x10000
 avr_FLASH:
-    .space 0x20000
+    .space (FLASHEND+1)<<1
 avr_PC:
     .long 0
 avr_last_wdr:
@@ -1138,6 +1160,8 @@ avr_IO   = avr_ADDR+0x20
 avr_SREG = avr_IO+0x3F
 avr_SP   = avr_IO+0x3D
 
+EIND = avr_IO+0x3C
+RAMPZ= avr_IO+0x3B
 Z    = avr_ADDR+30
 Y    = avr_ADDR+28
 X    = avr_ADDR+26

@@ -78,7 +78,7 @@ void avr_debug(unsigned long ip)
 int main(int argc, char **argv)
 {
     int i;
-    int n = ihex_read(argv[1], avr_FLASH, 0xFFFF);
+    int n = ihex_read(argv[1], avr_FLASH, 0x40000);
     if(n < 0)  {
         printf("could not read %s\n", argv[1]);
         return 2;

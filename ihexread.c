@@ -49,7 +49,7 @@ size_t ihex_read(const char *fname, void *image_ptr, size_t capacity)
 	unsigned char *image = image_ptr;
 	FILE *f;
 	char buffer[1024];
-	unsigned long int base = 0, lnr = 0;
+	unsigned long int segment = 0, base = 0, lnr = 0;
 	size_t size = 0;
 
 	buffer[1023] = -1;
@@ -71,7 +71,7 @@ size_t ihex_read(const char *fname, void *image_ptr, size_t capacity)
 			goto abort;
 		}
 
-		len	 = hex_byte(buffer+1);
+		len  = hex_byte(buffer+1);
 		addr = hex_byte(buffer+3)<<8 | hex_byte(buffer+5);
 		type = hex_byte(buffer+7);
 		if(len < 0 || addr < 0 || type < 0) {
@@ -79,16 +79,15 @@ size_t ihex_read(const char *fname, void *image_ptr, size_t capacity)
 			goto abort;
 		}
 
-		base = addr;
+		base = addr + segment;
 		if(base + len >= size)
 			size = base + len;
-		if(size >= capacity) {
-			printf("%ld:%ld\n", base, addr);
+		if(size > capacity) {
 			fprintf(stderr, "%s:%ld: ihex size exceeds capacity\n", fname, lnr);
 			goto abort;
 		}
 
-		for(i=0; i < len; i++) {
+		if(type == 0) for(i=0; i < len; i++) {
 			int byte = hex_byte(buffer+9+2*i);
 			if(byte < -1) {
 				fprintf(stderr, "%s:%ld: not hexadecimal data\n", fname, lnr);
@@ -96,20 +95,19 @@ size_t ihex_read(const char *fname, void *image_ptr, size_t capacity)
 			}
 			if(type == 0)
 				image[base+i] = byte;
+		} else if(type == 1) {
+			fclose(f);   /* ignore the checksum */
+			return size;
+		} else if(type == 2 && len == 2) {
+			segment = (hex_byte(buffer+9)<<8 | hex_byte(buffer+11)) * 16;
+		} else {
+			fprintf(stderr, "%s:%ld: unsupport frame type: type %d, %d bytes\n", fname, lnr, type, len);
+			goto abort;
 		}
 
 		cksum = hex_byte(buffer+9+2*len);
 		if(hex_byte_cksum != 0) {
 			fprintf(stderr, "%s:%ld: checksum error\n", fname, lnr);
-			goto abort;
-		}
-
-		if(type >= 1) {
-			if(type == 1) {
-				fclose(f);
-				return size;
-			}
-			fprintf(stderr, "%s:%ld: not an i8hex file\n", fname, lnr);
 			goto abort;
 		}
 	}
