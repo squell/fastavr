@@ -78,6 +78,7 @@ CF = 1<<0
 INTR=1
 FASTRESUME=1
 FASTFLAG=1
+FASTLDST=1
 PAR_LDS=0
 PAR_STK=1
 PAR_SBIW=0
@@ -155,6 +156,25 @@ flagcvt:
     and ecx, 0xF
     or ecx, eax
     and edx, 0xF
+.endm
+
+.macro transfer edx, esi
+    # don't use jumps, just read the locations
+    # if CF, store, otherwise, load
+.if FASTLDST
+    mov eax, edx
+    cmovc edx, esi
+    cmovc esi, eax
+    mov al, [avr_ADDR+esi]
+    mov [avr_ADDR+edx], al
+.else
+    mov al, [avr_ADDR+esi]
+    mov cl, [avr_ADDR+edx]
+    cmovc eax, ecx
+    cmovnc ecx, eax
+    mov [avr_ADDR+esi], al
+    mov [avr_ADDR+edx], cl
+.endif
 .endm
 
 .macro decode_next_instr service_ints=INTR
@@ -605,12 +625,7 @@ ld_st:
 
     # if CF, store, otherwise, load
     bt ecx, 4
-    mov al, [avr_ADDR+esi]
-    mov cl, [avr_ADDR+edx]
-    cmovc eax, ecx
-    cmovnc ecx, eax
-    mov [avr_ADDR+esi], al
-    mov [avr_ADDR+edx], cl
+    transfer edx, esi
     resume
 
 # a load or store from sreg
@@ -692,14 +707,7 @@ ldd_std:
     lea ecx, [esi-(avr_SREG - avr_ADDR)]
     jecxz conflict_sreg_2
 
-    # don't use jumps, just read the locations
-    # if CF, store, otherwise, load
-    mov al, [avr_ADDR+esi]
-    mov cl, [avr_ADDR+edx]
-    cmovc eax, ecx
-    cmovnc ecx, eax
-    mov [avr_ADDR+esi], al
-    mov [avr_ADDR+edx], cl
+    transfer edx, esi
     resume
 
 conflict_sreg_2:
