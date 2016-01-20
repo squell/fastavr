@@ -240,7 +240,7 @@ popa
     sbb dl, reg
 .endm
 
-.macro direct op, flags=, imm=, shift=
+.macro direct op, flags=, imm=, special=
     .ifc <imm>, <>
     mov al, [avr_ADDR+ecx]
     op [avr_ADDR+edx], al
@@ -254,11 +254,14 @@ popa
     pushf
     .ifc <flags>, <>
     pop ebx
+    .ifc <special>, <borrow>
+    and ebx, ebp
+    .endif
     .else
     pop eax
     and ebx, ~(flags)
-    .ifc <shift>, <>
-    and eax,  flags
+    .ifnc <special>, <shift>
+    and eax, flags
     or ebx, eax
     .else
     and eax, SF+ZF+CF
@@ -280,7 +283,7 @@ popa
     pop ebx
     .else
     pop eax
-    and ebx, ~flags
+    and ebx, ~(flags)
     and eax,  flags
     or ebx, eax
     .endif
@@ -339,14 +342,18 @@ e_add: direct add
 e_sub: direct sub
 .p2align 3
 e_sbc:
+    mov ebp, ebx
+    or ebp, ~ZF   # the avr handles ZF oddly during the borrow operations
     shr ebx, 1
-    direct sbb
+    direct sbb, ,, borrow
 .p2align 3
 e_cp:  direct cmp
 .p2align 3
 e_cpc:
+    mov ebp, ebx
+    or ebp, ~ZF
     shr ebx, 1
-    direct cmpc
+    direct cmpc, ,, borrow
 .p2align 3
 e_and: direct and, SF+OF+ZF
 .p2align 3
@@ -377,8 +384,10 @@ e_andi:
 .p2align 3
 e_sbci:
     imm
+    mov ebp, ebx
+    or ebp, ~ZF
     shr ebx, 1
-    direct sbb, , cl
+    direct sbb, , cl, borrow
 
 .p2align 3
 e_subi:
@@ -868,12 +877,18 @@ e_sbiw_adiw:
     add si, cx
     mov [avr_ADDR+edx*2+24], si
     pushf
-    pop ebx
+    pop eax
+    and ebx, ~(SF+OF+ZF+CF)
+    and eax, SF+OF+ZF+CF
+    or ebx, eax
     resume
 1:  sub si, cx
     mov [avr_ADDR+edx*2+24], si
     pushf
-    pop ebx
+    pop eax
+    and ebx, ~(SF+OF+ZF+CF)
+    and eax, SF+OF+ZF+CF
+    or ebx, eax
     resume
 .endif
 
@@ -960,7 +975,7 @@ f_com:
     direct1 compl, OF+SF+ZF+CF
 
 .p2align 3
-f_neg: direct1 neg, OF+SF+ZF+CF
+f_neg: direct1 neg
 
 .p2align 3
 f_swap:
@@ -984,7 +999,7 @@ f_ror:
     inc al
     dec al # load ZF, SF
     .endm
-    shr ebx, 1
+    bt ebx, 0
     direct rcr_flags, OF+SF+ZF+CF, 1, shift
 
 .p2align 3
