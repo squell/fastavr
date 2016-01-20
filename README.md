@@ -34,6 +34,8 @@ make
 
 Configuration options are found in `avr_core_x86.s`.
 
+A quick test can be performed by running `make selftest`.
+
 Todo/Limitations
 ====
 * The S flag is always stuck at V⊕O due to the way fastavr handles
