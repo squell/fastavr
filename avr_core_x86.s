@@ -41,6 +41,9 @@ BIGPC    = FLASHEND > 0xFFFF
 .global avr_SP
 .global avr_SREG
 
+.weak avr_io_in
+.weak avr_io_out
+
 .text
 
 .macro debug src
@@ -175,6 +178,17 @@ flagcvt:
     mov [avr_ADDR+esi], al
     mov [avr_ADDR+edx], cl
 .endif
+.endm
+
+.macro iosignal dir, port, bitmask=0xFF
+    push edx
+    push ecx
+    lea eax, port
+    push eax
+    call avr_io_\dir
+    pop ecx
+    pop ecx
+    pop edx
 .endm
 
 .macro decode_next_instr service_ints=INTR
@@ -505,11 +519,13 @@ e_bst:
 .p2align 3
 io_in1:
     avr_flags ebx      # might read sreg
+    iosignal in, [ecx+0x20]
     mov al, [avr_IO+ecx+0x20]
     mov [avr_ADDR+edx], al
     resume
 .p2align 3
 io_in:
+    iosignal in, [ecx]
     mov al, [avr_IO+ecx]
     mov [avr_ADDR+edx], al
     resume
@@ -519,6 +535,7 @@ io_out1:
     avr_flags ebx      # might modify sreg
     mov al, [avr_ADDR+edx]
     mov [avr_IO+ecx+0x20], al
+    iosignal out, [ecx+0x20]
     mov al, [avr_SREG]
     load_flags ebx
     resume
@@ -526,6 +543,7 @@ io_out1:
 io_out:
     mov al, [avr_ADDR+edx]
     mov [avr_IO+ecx], al
+    iosignal out, [ecx]
     resume
 
 # 1001 1000 AAAA Abbb CBI
@@ -619,27 +637,22 @@ ld_st:
 
     dec word ptr [avr_SP]  # final stacktweak
 
-    # check if we are accessing the flags
-    cmp esi, avr_SREG - avr_ADDR
-    je conflict_sreg
+    # check if we may be accessing the I/O space
+    cmp esi, IOEND
+    jbe check_io
 
     # if CF, store, otherwise, load
-    bt ecx, 4
+1:  bt ecx, 4
     transfer edx, esi
     resume
 
-# a load or store from sreg
-conflict_sreg:
-    avr_flags ebx
+check_io:
+    cmp esi, 0x20
+    jb 1b
     bt ecx, 4
-    mov al, [avr_ADDR+esi]
-    mov cl, [avr_ADDR+edx]
-    cmovc eax, ecx
-    cmovnc ecx, eax
-    mov [avr_ADDR+esi], al
-    mov [avr_ADDR+edx], cl
-    load_flags ebx
-    resume
+    lea ecx, [esi-0x40]
+    jc io_out1
+    jmp io_in1
 
 # TODO: only (E)LPM and (E)LPM+  implemented yet
 e_lpm:
@@ -703,16 +716,21 @@ ldd_std:
     # edx = reg
     # esi = index
 
-    # check if we are accessing the flags
-    lea ecx, [esi-(avr_SREG - avr_ADDR)]
-    jecxz conflict_sreg_2
+    # check if we may be accessing io (without altering cf)
+    lea ecx, [esi-IOEND]
+    dec ecx
+    js check_io_2
 
-    transfer edx, esi
+1:  transfer edx, esi
     resume
 
-conflict_sreg_2:
-    or ecx, 1<<4
-    jmp conflict_sreg
+check_io_2:
+    lea ecx, [esi-0x1F]
+    dec ecx
+    js 1b
+    lea ecx, [ecx-0x20]
+    jc io_out1
+    jmp io_in1
 
 .p2align 3
 umult:
@@ -1102,6 +1120,13 @@ avr_step:
     mov byte ptr [avr_INT], 1
     decode_next_instr 0
 .endif
+
+.p2align 3
+avr_io_in:
+    ret
+.p2align 3
+avr_io_out:
+    ret
 
 .data
 
