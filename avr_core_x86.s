@@ -22,9 +22,35 @@
 .intel_syntax noprefix
 .altmacro
 
+/* chip options -- consult your datasheet; examples:
+
+Atmega2560: SRAM=8192, FLASHEND=0x1FFFF, IOEND=0x1FF
+Atmega644:  SRAM=4096, FLASHEND= 0x7FFF, IOEND= 0xFF
+Attiny85:   SRAM= 512, FLASHEND=  0xFFF, IOEND= 0x5F
+
+*/
 SRAM     = 8192
 FLASHEND = 0x1FFFF
 IOEND    = 0x1FF
+
+/* functional options */
+LOOPHALT=1	# detect RJMP -1 as a halting condition?
+INTR=1		# enable interrupt functionality? (turn this off to get a little bit more speed)
+
+/* debugging switch; used for debugging the simulator itself -- produces traces by calls to avr_debug */
+DEBUG=0
+
+/* optimization options */
+FASTRESUME=1	# eliminate a constant jump from the instruction decoding cycle -- keep this on!
+FASTFLAG=1	# use a lookup table to convert x86 flags to AVR
+FASTLDST=1	# use a different sequence of CMOVcc for deciding between loads and stores
+
+/* branch prediction options; set to 0 if a predictable choice can be made, 1 for mixed code */
+PAR_LDS=1	# use branchless code to distinguish LD/ST from LDS/STS?
+PAR_STK=1	# use branchless code to distinguish PUSH/POP from LD/ST?
+PAR_SBIW=1	# use branchless code to distinguish ADIW and SBIW?
+
+/* don't touch these */
 RAMEND   = SRAM + IOEND
 BIGPC    = FLASHEND > 0xFFFF
 
@@ -77,16 +103,6 @@ OF = 1<<11
 SF = 1<<7
 ZF = 1<<6
 CF = 1<<0
-
-DEBUG=0
-LOOPHALT=1
-INTR=1
-FASTRESUME=1
-FASTFLAG=1
-FASTLDST=1
-PAR_LDS=0
-PAR_STK=1
-PAR_SBIW=0
 
 .if FASTFLAG
 .data
@@ -590,6 +606,31 @@ io_bit_skip:
     jz skipins
     resume
 
+/*
+
+1001 00sd dddd XXXX
+
+0000 LDS/STS + next word
+0001 z+
+0010 -z
+
+0100 lpm Z / xch Z
+0101 lpm Z+ / las Z
+
+0110 elpm Z / lac Z
+0111 elpm Z+ / lat Z
+
+1001 y+
+1010 -y
+
+1100 x
+1101 x+
+1110 -x
+
+1111 pop / push
+
+*/
+
 # this code is optimized for the 'happy path' (ld/st)
 # with tweaks added to support lpm, lds and pop/push
 .p2align 3
@@ -701,7 +742,7 @@ e_lpm:
     resume
 
 e_xch_la:
-    call abort
+call abort
 
 /*
 sd dddd 0000 LDS
@@ -1282,34 +1323,3 @@ RAMPZ= avr_IO+0x3B
 Z    = avr_ADDR+30
 Y    = avr_ADDR+28
 X    = avr_ADDR+26
-
-;IO   = avr_ADDR+0x20
-;SRAM = avr_ADDR+0x60
-
-
-/*
-
-1001 00sd dddd XXXX
-
-
-
-0000 LDS/STS + next word
-0001 z+
-0010 -z
-
-0100 lpm Z / xch Z
-0101 lpm Z+ / las Z
-
-0110 elpm Z / lac Z
-0111 elpm Z+ / lat Z
-
-1001 y+
-1010 -y
-
-1100 x
-1101 x+
-1110 -x
-
-1111 pop / push
-
-*/
