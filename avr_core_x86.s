@@ -1,7 +1,7 @@
 /*
 
     AVR simulator (x86 version)
-    Copyright (C) 2014 Marc Schoolderman
+    Copyright (C) 2014, 2016 Marc Schoolderman
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -78,6 +78,8 @@ SF = 1<<7
 ZF = 1<<6
 CF = 1<<0
 
+DEBUG=0
+LOOPHALT=1
 INTR=1
 FASTRESUME=1
 FASTFLAG=1
@@ -205,7 +207,8 @@ flagcvt:
     shr eax, 10
     cmovnc ecx, esi
 
-.if 0
+.if DEBUG
+FASTRESUME = 0
 pusha
 avr_flags ebx
 push edi
@@ -475,6 +478,11 @@ rjmp:
     movzx edx, word ptr [avr_FLASH+(edi-1)*2]
     shl edx, 4+16
     sar edx, 4+16
+.if LOOPHALT
+    cmp edx, -1
+    mov esi, 1
+    je exit
+.endif
     lea edi, [edi+edx]
     shr eax, 3
 .if BIGPC
@@ -656,24 +664,36 @@ check_io:
 
 # TODO: only (E)LPM and (E)LPM+  implemented yet
 e_lpm:
+    test ecx, 0x20
+    jnz e_xch_la
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
     movzx esi, word ptr [Z]
 .if BIGPC
-    # note: RAMPZ is not incremented, as it isn't in actual mcu's
     mov al, [RAMPZ]
     shl eax, 16
-    add eax, esi
+    or eax, esi
     test ecx, 2
     cmovnz esi, eax
 .endif
-    and esi, (FLASHEND<<1)+1
+    #and esi, (FLASHEND<<1)+1   # unsure if (E)LPM should exhibit wrap-around behaviour
     mov al, [avr_FLASH+esi]
     bt ecx, 0
     adc esi, 0
     mov [Z], si
+.if BIGPC
+    test ecx, 2
+    mov ecx, esi
+    cmovz ecx, eax
+    shr ecx, 16
+    mov [RAMPZ], cl
+.endif
     mov [avr_ADDR+edx], al
     resume
+
+e_xch_la:
+    call abort
+
 /*
 sd dddd 0000 LDS
 sd dddd 0001 ld Z+
@@ -736,22 +756,22 @@ check_io_2:
 umult:
     mov al, [avr_ADDR+edx]
     mul byte ptr [avr_ADDR+ecx]
-1:  test ax, ax
-    bt eax, 15
-2:  mov [avr_ADDR], ax
+    mov [avr_ADDR], ax
+    test ax, ax
+    sets cl
     setz al
-    lea eax, [eax*8] # shl al, 6 without modifying CF
-    lea eax, [eax*8]
-    adc al, 0
-    and ebx, ~(ZF+CF)
-    and eax, (ZF+CF)
-    or ebx, eax
+    shl al, 6
+    and bl, ~(ZF+CF)
+    or bl, cl
+    or bl, al
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
     resume
 
+#TODO FIXME
 .p2align 3
 smult:
+call abort
     test dl, 0x10
     jnz exotic_mult
     and ecx, 0xF
@@ -779,6 +799,7 @@ exotic_mult:
     test ax, ax   # probe ax for ZF and CF in case of MULSU
     bt ax, 15
     shl ax, cl    # otherwise use the result of shl
+2:
     jmp 2b
 
 fmul:
@@ -958,10 +979,10 @@ f_lsr:
 f_ror:
     .macro rcr_flags byte ptr dst, imm
     mov al, byte ptr dst
-    inc al
-    dec al # load ZF, SF
     rcr al, imm
     mov byte ptr dst, al
+    inc al
+    dec al # load ZF, SF
     .endm
     shr ebx, 1
     direct rcr_flags, OF+SF+ZF+CF, 1, shift
@@ -991,7 +1012,8 @@ f_ind_jump:
     shl ecx, 16
     test edx, 1
     cmovnz edi, ecx
-    or dl, 8     # make sure 3 bytes are subtracted
+    lea edx, [edx*2+edx] # make sure 3 bytes are subtracted in EICALL
+    shr edx, 1
 .else
     rol di, 8
     bt edx, 4    # if icall, modify stack
@@ -1231,7 +1253,7 @@ avr_INTR:
 avr_ADDR:
     .space 0x10000
 avr_FLASH:
-    .space 2<<22
+    .space 0x2000000
 avr_PC:
     .long 0
 
