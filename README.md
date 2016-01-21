@@ -44,8 +44,13 @@ or writing SREG via I/O-space
 
 * No self-programming ability (SPM instruction, EEPROM).
 
-* No support for Reduced Core AVR, XMEGA, or extensions like DES/AES; also,
-  not all unsupported instructions will result in an error, just like in the real world.
+* No support for Reduced Core AVR; the DES instruction is only supported
+  as a hook for a C function.
+  
+* Cycle count is not correct for XMEGA microcontrollers
+
+* Not all illegal opcodes will result in an error, just like in a
+  real microcontroller.
 
 * The core needs to be ported to x86-64
 

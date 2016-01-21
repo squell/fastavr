@@ -54,6 +54,26 @@ PAR_SBIW=1	# use branchless code to distinguish ADIW and SBIW?
 RAMEND   = SRAM + IOEND
 BIGPC    = FLASHEND > 0xFFFF
 
+/* user interface:
+
+   void avr_reset()	resets the avr (doesn't clear the SRAM/registers/etc)
+   void avr_run()	runs the avr until sleep/break or an interrupt occurs
+   void avr_step()	as avr_run(), but executes only a single instruction
+
+   the following functions, if defined by te user, will be used in the following way:
+
+   void avr_in(int port)
+   void avr_out(int port)
+   			called right before IN/after OUT instructions, with the affected
+			port as an argument (default: do nothing)
+   void avr_in_bit(int port, int biot)
+   void avr_out_bit(int port, int biot)
+   			as above, but for SBI/CBI and SBIS/SBIC instructions
+			(default: call avr_in and avr_out)
+   void avr_des_round(int round, byte* data, byte* key)
+   			called when a DES instruction is executed (default: abort)
+*/
+
 .global avr_reset
 .global avr_run
 .global avr_step
@@ -68,7 +88,10 @@ BIGPC    = FLASHEND > 0xFFFF
 .global avr_SREG
 
 .weak avr_io_in
+.weak avr_io_in_bit
 .weak avr_io_out
+.weak avr_io_out_bit
+.weak avr_des_round
 
 .text
 
@@ -353,9 +376,11 @@ e_adc:
     shr ebx, 1
     direct adc
 .p2align 3
-e_add: direct add
+e_add:
+    direct add
 .p2align 3
-e_sub: direct sub
+e_sub:
+    direct sub
 .p2align 3
 e_sbc:
     mov ebp, ebx
@@ -363,7 +388,8 @@ e_sbc:
     shr ebx, 1
     direct sbb, ,, borrow
 .p2align 3
-e_cp:  direct cmp
+e_cp:
+    direct cmp
 .p2align 3
 e_cpc:
     mov ebp, ebx
@@ -371,11 +397,14 @@ e_cpc:
     shr ebx, 1
     direct cmpc, ,, borrow
 .p2align 3
-e_and: direct and, SF+OF+ZF
+e_and:
+    direct and, SF+OF+ZF
 .p2align 3
-e_or:  direct or,  SF+OF+ZF
+e_or:
+    direct or,  SF+OF+ZF
 .p2align 3
-e_eor: direct xor, SF+OF+ZF
+e_eor:
+    direct xor, SF+OF+ZF
 
 .p2align 3
 e_ldi:
@@ -594,13 +623,28 @@ io_bit:
     btr ecx, 4 # CF = set
     jc 1f
     lock btr [avr_IO+edx], ecx
+    push ecx
+    push edx
+    call avr_io_out_bit
+    add esp, 8
     resume
 1:  lock bts [avr_IO+edx], ecx
+    push ecx
+    push edx
+    call avr_io_out_bit
+    add esp, 8
     resume
 
 io_bit_skip:
     btr ecx, 4 # CF = skip if set
     setc al
+    push eax
+    push ecx
+    push edx
+    call avr_io_in_bit
+    pop edx
+    pop ecx
+    pop eax
     bt [avr_IO+edx], ecx
     sbb al, 0  # ZF = condition matched
     jz skipins
@@ -741,7 +785,7 @@ e_lpm:
     mov [avr_ADDR+edx], al
     resume
 
-# these instructions are probably geared towards a multicore AVR, 
+# these instructions are probably geared towards a multicore AVR,
 # but it won't hurt to have them.
 e_xch_la:
     movzx esi, word ptr [Z]
@@ -759,7 +803,7 @@ e_xch_la:
     xor dh, al
     # dl=las, dh=lat, bp=lac
     # Z&NC -> xch, Z&C->las, NZ&NC->lac, NZ&C->lat
-    shr ecx, 1 
+    shr ecx, 1
     cmovc eax, edx
     mov dl, dh
     cmovnc edx, ebp
@@ -917,7 +961,7 @@ e_1op_misc:
     jc e_sbiw_adiw
     jmp [subdecode_table+eax*4]
 
-# this is a bit painful to write without using any further aconditional jumps
+# this is a bit painful to write without using any further conditional jumps
 e_sbiw_adiw:
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
@@ -1188,6 +1232,17 @@ interrupt:
     jmp exit
 .endif
 
+.p2align 3
+f_des:
+    mov edx, [avr_ADDR+edx]
+    lea eax, [avr_ADDR+8]
+    push eax
+    push offset avr_ADDR
+    push edx
+    call avr_des_round
+    add esp, 12
+    resume
+
 unhandled:
     xor esi, esi
     dec esi
@@ -1235,6 +1290,15 @@ avr_io_in:
 .p2align 3
 avr_io_out:
     ret
+.p2align 3
+avr_io_in_bit:
+    jmp avr_io_in
+.p2align 3
+avr_io_out_bit:
+    jmp avr_io_out
+.p2align 3
+avr_des_round:
+    jmp abort
 
 .data
 
@@ -1320,7 +1384,7 @@ subdecode_table:
 /* 1000 */ .long f_flag_misc
 /* 1001 */ .long f_ind_jump
 /* 1010 */ .long f_dec
-/* 1011 */ .long unhandled # DES TODO ?
+/* 1011 */ .long f_des
 /* 11xx */ .long f_abs_jump
 /* 11xx */ .long f_abs_jump
 /* 11xx */ .long f_abs_jump
