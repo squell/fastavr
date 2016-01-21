@@ -11,7 +11,7 @@ fastavr is like these, but with the main design goals of raw speed and simplicit
 Features
 =========
 
-* Most of the common AVR instructions (see below)
+* Supports all common AVR instructions (see below)
 * Optional user-definable behaviour of all AVR I/O ports
 * Interrupts and single-stepping
 * Possibility of simulating components using multi-threading
@@ -43,8 +43,6 @@ the flags. This should only be noticeable when using SES/SEV/SEO/CLS/CLV/CLO
 or writing SREG via I/O-space
 
 * No self-programming ability (SPM instruction, EEPROM).
-
-* XCH/LAC/LAT/LAS not yet implemented
 
 * No support for Reduced Core AVR, XMEGA, or extensions like DES/AES; also,
   not all unsupported instructions will result in an error, just like in the real world.

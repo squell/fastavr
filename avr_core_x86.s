@@ -714,7 +714,7 @@ check_io:
 
 # TODO: only (E)LPM and (E)LPM+  implemented yet
 e_lpm:
-    test ecx, 0x20
+    test ecx, 0x10
     jnz e_xch_la
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
@@ -741,8 +741,33 @@ e_lpm:
     mov [avr_ADDR+edx], al
     resume
 
+# these instructions are probably geared towards a multicore AVR, 
+# but it won't hurt to have them.
 e_xch_la:
-call abort
+    movzx esi, word ptr [Z]
+    mov ah, [avr_ADDR+esi]
+    mov al, [avr_ADDR+edx]
+    mov [avr_ADDR+edx], ah
+    and ecx, 3
+    mov edx, eax
+    mov dl, dh
+    not al
+    and dl, al
+    not al
+    mov ebp, edx
+    or dl, al
+    xor dh, al
+    # dl=las, dh=lat, bp=lac
+    # Z&NC -> xch, Z&C->las, NZ&NC->lac, NZ&C->lat
+    shr ecx, 1 
+    cmovc eax, edx
+    mov dl, dh
+    cmovnc edx, ebp
+    cmovnz eax, edx
+    mov [avr_ADDR+esi], al
+    add dword ptr [avr_cycle], 1
+    adc dword ptr [avr_cycle+4], 0
+    resume
 
 /*
 sd dddd 0000 LDS
