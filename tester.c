@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -86,8 +87,14 @@ void avr_io_in(int port)
 void avr_io_out(int port)
 {
 	switch(port) {
+		int c;
 	case 0xA6:
-		putchar(avr_IO[port]);
+		c = avr_IO[port];
+		if(c == 0x04) {
+			avr_debug(0);
+			exit(0);
+		}
+		putchar(c);
 		fflush(stdout);
 	}
 }
@@ -128,6 +135,10 @@ int main(int argc, char **argv)
 			break;
 		case 2:
 			fprintf(stderr, "%s\n", "breakpoint");
+			do {
+			    avr_debug(avr_PC-1);
+			    getchar();
+			} while(avr_step() == 0);
 			break;
 		case 3:
 			fprintf(stderr, "%s\n", "mcu spinlocked");

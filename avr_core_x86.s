@@ -34,7 +34,7 @@ FLASHEND = 0x1FFFF
 IOEND    = 0x1FF
 
 /* functional options */
-ABORTDETECT=1	# detect RJMP -1 as a halting condition?
+ABORTDETECT=0	# detect RJMP -1 as a halting condition?
 INTR=1		# enable interrupt functionality? (turn this off to get a little bit more speed)
 
 /* debugging switch; used for debugging the simulator itself -- produces traces by calls to avr_debug */
