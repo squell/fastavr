@@ -129,8 +129,11 @@ int main(int argc, char **argv)
 		case 2:
 			fprintf(stderr, "%s\n", "breakpoint");
 			break;
+		case 3:
+			fprintf(stderr, "%s\n", "mcu spinlocked");
+			break;
 		default:
-			fprintf(stderr, "unexpected situation: PC=%04lx instruction=%04x\n", avr_PC, avr_FLASH[avr_PC]);
+			fprintf(stderr, "unexpected situation: PC=%04lx instruction=%04x\n", avr_PC-1, avr_FLASH[avr_PC-1]);
 			break;
 		}
 		break;

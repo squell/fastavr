@@ -34,7 +34,7 @@ FLASHEND = 0x1FFFF
 IOEND    = 0x1FF
 
 /* functional options */
-LOOPHALT=1	# detect RJMP -1 as a halting condition?
+ABORTDETECT=1	# detect RJMP -1 as a halting condition?
 INTR=1		# enable interrupt functionality? (turn this off to get a little bit more speed)
 
 /* debugging switch; used for debugging the simulator itself -- produces traces by calls to avr_debug */
@@ -503,9 +503,9 @@ rjmp:
     movzx edx, word ptr [avr_FLASH+(edi-1)*2]
     shl edx, 4+16
     sar edx, 4+16
-.if LOOPHALT
+.if ABORTDETECT
     cmp edx, -1
-    mov esi, 1
+    mov esi, 3
     je exit
 .endif
     lea edi, [edi+edx]
