@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <string.h>
 #include "ihexread.h"
 
 extern volatile unsigned long long avr_cycle;
@@ -101,11 +102,12 @@ void avr_io_out(int port)
 
 int main(int argc, char **argv)
 {
+	memset(avr_FLASH, 0xFF, 0x40000);
     	if(!argv[1]) {
 		fprintf(stderr, "usage: tester [file.hex]\n");
 	    	return 2;
 	}
-	int n = ihex_read(argv[1], avr_FLASH, 0x10000);
+	int n = ihex_read(argv[1], avr_FLASH, 0x40000);
 	if(n < 0)  {
 		fprintf(stderr, "could not read %s\n", argv[1]);
 		return 2;
