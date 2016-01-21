@@ -806,9 +806,9 @@ check_io_2:
 umult:
     mov al, [avr_ADDR+edx]
     mul byte ptr [avr_ADDR+ecx]
-    mov [avr_ADDR], ax
-    test ax, ax
+1:  test ax, ax
     sets cl
+2:  mov [avr_ADDR], ax
     setz al
     shl al, 6
     and bl, ~(ZF+CF)
@@ -818,10 +818,8 @@ umult:
     adc dword ptr [avr_cycle+4], 0
     resume
 
-#TODO FIXME
 .p2align 3
 smult:
-call abort
     test dl, 0x10
     jnz exotic_mult
     and ecx, 0xF
@@ -846,11 +844,15 @@ exotic_mult:
     setc cl
     cbw
     imul dx
-    test ax, ax   # probe ax for ZF and CF in case of MULSU
-    bt ax, 15
-    shl ax, cl    # otherwise use the result of shl
-2:
+    test ax, ax   # probe ax for ZF
+    mov dx, ax
+    rol dx, 1     # probe ax for CF (for MULSU)
+    shl ax, cl    # otherwise use the result of shl (won't affect flags if cl=0)
+    setc cl
     jmp 2b
+
+# SF=c | ~       (mulsu | fmulsu)
+# CF=0 | c
 
 fmul:
     test cl, 0x8
@@ -860,6 +862,7 @@ fmul:
     mov al, [avr_ADDR+ecx+16]
     mul byte ptr [avr_ADDR+edx+16]
     shl ax, 1
+    setc cl
     jmp 2b
 
 fmuls:
@@ -868,6 +871,7 @@ fmuls:
     mov al, [avr_ADDR+ecx+16]
     imul byte ptr [avr_ADDR+edx+16]
     shl ax, 1
+    setc cl
     jmp 2b
 
 /*

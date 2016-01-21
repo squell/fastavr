@@ -44,11 +44,10 @@ or writing SREG via I/O-space
 
 * No self-programming ability (SPM instruction, EEPROM).
 
-* Signed and fractional multiplication (MULs,MULSU,FMUL,FMULS) are temporarily out of order.
-
 * XCH/LAC/LAT/LAS not yet implemented
 
-* No support for Reduced Core AVR, XMEGA, or extensions like DES/AES.
+* No support for Reduced Core AVR, XMEGA, or extensions like DES/AES; also,
+  not all unsupported instructions will result in an error, just like in the real world.
 
 * The core needs to be ported to x86-64
 
