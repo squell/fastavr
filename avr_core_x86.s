@@ -1069,20 +1069,21 @@ f_ind_jump:
     test edx, 1
     cmovnz edi, ecx
     lea edx, [edx*2+edx] # make sure 3 bytes are subtracted in EICALL
-    shr edx, 1
+    shr edx, 4
 .else
     rol di, 8
     bt edx, 4    # if icall, modify stack
     mov si, [avr_ADDR+eax-1]
     cmovc esi, edi
     mov [avr_ADDR+eax-1], si
-.endif
     shr edx, 3
+.endif
     sub eax, edx
     mov [avr_SP], ax
 
 .if BIGPC
     mov di, word ptr [Z]
+    or edx, 1
     add dword ptr [avr_cycle], edx
 .else
     movzx edi, word ptr [Z]
