@@ -56,20 +56,38 @@ BIGPC    = FLASHEND > 0xFFFF
 
 /* user interface:
 
-   void avr_reset()	resets the avr (doesn't clear the SRAM/registers/etc)
-   void avr_run()	runs the avr until sleep/break or an interrupt occurs
-   void avr_step()	as avr_run(), but executes only a single instruction
+   recommended to declare the following data as volatile/atomic:
 
-   the following functions, if defined by te user, will be used in the following way:
+   byte avr_DATA[]	the data-addressable space of the AVR (including CPU registers, I/O registeres)
+   byte avr_IO[]	the I/O-addressable space of the AVR (aliassed with avr_DATA)
+   byte avr_INT		set this to 1 to trigger an interrupt in avr_run()
+
+   the following are not guaranteed to be meaningful when accessed/modified when avr_run is active:
+
+   byte avr_SREG	the avr flags registers (equal to avr_IO[0x3F])
+   word avr_SP		the avr stack pointer   (equal to avr_IO[0x3D]|avr_IO[0x3E<<8)
+   word avr_PC		the avr program counter
+
+   callable functions:
+
+   void avr_reset()	resets the avr (doesn't clear the SRAM/registers/etc)
+   int avr_run()	runs the avr until sleep/break or an interrupt occurs
+   int avr_step()	as avr_run(), but executes only a single instruction
+
+	return status: 0=interrupt, 1=sleep, 2=break, 3=rjmp -1, else: unhandled
+
+   the following optional functions, if defined by the user, will be used as follows:
 
    void avr_in(int port)
    void avr_out(int port)
-   			called right before IN/after OUT instructions, with the affected
-			port as an argument (default: do nothing)
+   			called right before IN/after OUT instructions (or data access to I/O),
+			with the affected port as an argument (default: do nothing);
+			if port = 0x3F, avr_SREG can be accessed/modified
    void avr_in_bit(int port, int biot)
    void avr_out_bit(int port, int biot)
    			as above, but for SBI/CBI and SBIS/SBIC instructions
 			(default: call avr_in and avr_out)
+
    void avr_des_round(int round, byte* data, byte* key)
    			called when a DES instruction is executed (default: abort)
 */
@@ -1255,7 +1273,7 @@ redo_exit:
     dec edi
     mov [avr_INTR], esi
 
-# return status: 0 = interrupted, 1 = sleep, 2 = break, else: unhandled
+# return status: 0 = interrupted, 1 = sleep, 2 = break, 3 = rjmp -1, else: unhandled
 exit:
     # wrap-up
     avr_flags ebx
