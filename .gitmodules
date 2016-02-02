@@ -1,3 +1,4 @@
 [submodule "tinyTwofish"]
 	path = tinyTwofish
 	url = https://github.com/squell/tinyTwofish.git
+	branch = master
