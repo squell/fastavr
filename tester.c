@@ -92,6 +92,7 @@ void avr_io_out(int port)
 	case 0xA6:
 		c = avr_IO[port];
 		if(c == 0x04) {
+			fprintf(stderr, "end of transmission\n");
 			avr_debug(0);
 			exit(0);
 		}
@@ -103,9 +104,9 @@ void avr_io_out(int port)
 int main(int argc, char **argv)
 {
 	memset(avr_FLASH, 0xFF, 0x40000);
-    	if(!argv[1]) {
+	if(!argv[1]) {
 		fprintf(stderr, "usage: tester [file.hex]\n");
-	    	return 2;
+		return 2;
 	}
 	int n = ihex_read(argv[1], avr_FLASH, 0x40000);
 	if(n < 0)  {
