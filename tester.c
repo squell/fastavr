@@ -17,18 +17,18 @@ extern unsigned short int avr_FLASH[];
 extern unsigned short int avr_SP;
 extern unsigned char avr_SREG;
 
+static volatile enum { I_WDINT, I_WDRESET } INT_reason;
+
 /* a watchdog process; behaves mostly according to the datasheet,
    except that the timed sequence involving WDCE isn't implemented */
 
-pthread_t thread;
+pthread_t wdt_thread;
 
 #define MCUSR (avr_IO[0x34])
 #define WDTCR (avr_IO[0x21])
 
-unsigned char wdtcr;
-
 enum wdtcr_bits {
-	WDIF = 1<<7, WDIE = 1<<6, WDCE = 1<<4, WDE	= 1<<3
+	WDIF = 1<<7, WDIE = 1<<6, WDCE = 1<<4, WDE = 1<<3
 };
 
 void *watchdog(void *threadid)
@@ -38,7 +38,7 @@ void *watchdog(void *threadid)
 	fprintf(stderr, "%s\n", "starting watchdog");
 	for(;;) {
 		usleep(1024);
-		wdtcr = WDTCR;
+		unsigned char wdtcr = WDTCR;
 		unsigned long cur = avr_last_wdr;
 		unsigned long threshold = 2ul << ((wdtcr&0x20)/4 + (wdtcr&0x7)) % 10;
 		if(cur == last_wdr && wdtcr&0x48 && ++timer > threshold) {
@@ -49,12 +49,13 @@ void *watchdog(void *threadid)
 					wdtcr &=~WDIE;
 				WDTCR = wdtcr;
 				timer = 0;
+				INT_reason = I_WDINT;
 				avr_INT = 1;
 			} else if(wdtcr & WDE) {
-				wdtcr = 0;
 				timer = 0;
+				INT_reason = I_WDRESET;
 				avr_INT = 1;
-				while(avr_INT)	/* force-quit the emulator */
+				while(avr_INT)  /* force-quit the emulator */
 					avr_IO[0x3F] = 0x80;
 			}
 		} else if(cur != last_wdr) {
@@ -118,21 +119,23 @@ int main(int argc, char **argv)
 	avr_reset();
 	MCUSR |= 0x1;  /* set PORF */
 	/* WDTCR |= WDE; uncomment this to start the watchdog timer by default */
-	pthread_create(&thread, 0, watchdog, 0);
+	pthread_create(&wdt_thread, 0, watchdog, 0);
 	do {
 		switch( avr_run() ) {
 		case 0:
-			if(wdtcr) {
+			switch(INT_reason) {
+			case I_WDINT:
 				fprintf(stderr, "%s\n", "watchdog interrupt");
 				avr_PC = 0xC;
 				WDTCR &=~WDIF;
-			} else {
+				continue;
+			case I_WDRESET:
 				fprintf(stderr, "%s\n", "watchdog reset");
 				avr_reset();
 				MCUSR |= 0x8; /* set WDRF */
 				break;
 			}
-			continue;
+			break;
 		case 1:
 			fprintf(stderr, "%s\n", "mcu idle");
 			break;
