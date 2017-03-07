@@ -146,12 +146,44 @@ static unsigned char TEMP;
 /* offsets to derive the counters from the free-running prescaler */
 static unsigned long long timer_ofs[2];
 
+#define THREAD_IO 100
+#ifdef THREAD_IO
+pthread_t tty_thread;
+
+volatile char uart_buffer[256];
+volatile unsigned int uart_ptr, uart_end;
+
+void *fake_console(void *threadid)
+{
+	avr_IO[UCSR0A] = 0x60;
+	if(isatty(fileno(stdout))) setbuf(stdout, 0);
+	while(1) {
+		int ptr = uart_ptr;
+		while(ptr != uart_end || avr_IO[UCSR0A] == 0) {
+			int c = uart_buffer[ptr];
+			uart_ptr = ptr = (ptr+1) % sizeof uart_buffer;
+			avr_IO[UCSR0A] = 0x60;
+			if(c == 0x04) {
+				fprintf(stderr, "end of transmission\n");
+				avr_debug(0);
+				exit(0);
+			}
+			putchar(c);
+		}
+		usleep(THREAD_IO);
+	}
+}
+
+#endif
+
 void avr_io_in(int port)
 {
 	switch(port) {
+#ifndef THREAD_IO
 	case UCSR0A:
-		avr_IO[port] = -1;
+		avr_IO[port] = 0x60;
 		break;
+#endif
 	case TCNT0: {
 		static unsigned long long timer;
 		copy_timer(&timer, TCCR0B, TIFR0, TIMSK0, 8);
@@ -175,6 +207,18 @@ void avr_io_in(int port)
 void avr_io_out(int port)
 {
 	switch(port) {
+#ifdef THREAD_IO
+		unsigned short cur;
+	case UDR0:
+		cur = uart_end;
+		uart_buffer[cur] = avr_IO[port];
+		cur = (cur+1) % sizeof uart_buffer;
+		if(cur == uart_ptr) {
+			avr_IO[UCSR0A] = 0x00;
+			/* fprintf(stderr, "warning: flow control used\n"); */
+		}
+		uart_end = cur;
+#else
 		int c;
 	case UDR0:
 		c = avr_IO[port];
@@ -185,6 +229,7 @@ void avr_io_out(int port)
 		}
 		putchar(c);
 		fflush(stdout);
+#endif
 		break;
 	case TIFR0:
 	case TIFR1:
@@ -226,6 +271,9 @@ int main(int argc, char **argv)
 	avr_IO[MCUSR] |= 0x1;  /* set PORF */
 	/* avr_IO[WDTCR] |= WDE; uncomment this to start the watchdog timer by default */
 	pthread_create(&wdt_thread, 0, watchdog, 0);
+#ifdef THREAD_IO
+	pthread_create(&tty_thread, 0, fake_console, 0);
+#endif
 	do {
 		switch( avr_run() ) {
 		case 0:
