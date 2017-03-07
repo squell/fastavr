@@ -82,8 +82,15 @@ void avr_debug(unsigned long ip)
 
 void avr_io_in(int port)
 {
+	static short temp = -1;
 	if(port == 0xA0)
 		avr_IO[port] = -1;
+	else if(port == 0x26) // TCNT0
+		avr_IO[port] = avr_cycle;
+	else if(port == 0x64) // TCNT1L
+		avr_IO[port] = avr_cycle >> 8, temp = avr_cycle >> 16;
+	else if(port == 0x65) // TCNT1H
+		avr_IO[port] = temp<0? avr_cycle >> 16 : temp, temp = -1;
 }
 
 void avr_io_out(int port)
@@ -99,6 +106,12 @@ void avr_io_out(int port)
 		}
 		putchar(c);
 		fflush(stdout);
+		break;
+	case 0x26:
+	case 0x64:
+	case 0x65:
+		// any write to the timers will now simply reset them
+		avr_cycle = 0;
 	}
 }
 
