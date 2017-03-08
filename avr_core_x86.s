@@ -1237,15 +1237,22 @@ interrupt:
     btr dword ptr [avr_SREG], 7     # if IF is clear, ignore the interrupt
     jc 1f
     jmp [decode_table+eax*4]
-1:  add dword ptr [avr_cycle], 3
+1:  add dword ptr [avr_cycle], 3-BIGPC
     adc dword ptr [avr_cycle+4], 0
     dec edi
     mov [avr_INTR], esi
     movzx edx, word ptr [avr_SP]
-    mov cx, di
+    mov ecx, edi
+.if BIGPC
+    bswap ecx
+    mov cl, [avr_ADDR+edx-3]
+    mov [avr_ADDR+edx-3], ecx
+    sub edx, 3
+.else
     rol cx, 8
     mov [avr_ADDR+edx-1], cx
     sub edx, 2
+.endif
     mov [avr_SP], dx
     jmp exit
 .endif
