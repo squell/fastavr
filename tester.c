@@ -77,26 +77,95 @@ void *watchdog(void *threadid)
 	return 0;
 }
 
- /* two io functions to fake a proper USART */
+/* scale the cpu cycle count according to TCCRxB, and generate an overflow interrupt if demanded
+   if the first argument is NULL, only compute the scaled count; tihs routine is used to easily
+   (partially) implement counters/timers
+
+   NOTE that interrupts will only be generated when a counter value is polled; this should suffice
+   for creating counters; for a more realistic emulation, an extra thread would be needed. */
+
+#define GTCCR  0x23
+
+static unsigned long long prescaler;
+static unsigned T_OVF_backlog; /* number of overflow events to catch up on */
+
+static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits)
+{
+	tccr = avr_IO[tccr] & 7;
+	if(!tccr) return 0;
+
+	if(avr_IO[GTCCR]&1) prescaler = avr_cycle;
+
+	int h = 1 - (tccr >> 2);
+	unsigned long long scaled_count = avr_cycle - prescaler >> (2+h)*(tccr-h);
+	if(!prev) return scaled_count;
+
+	if(*prev >> bits != scaled_count >> bits) {
+		avr_IO[tifr] |= 1;
+		if(avr_IO[timsk]&1) { /* generate interruptions */
+			T_OVF_backlog = (scaled_count >> bits) - (*prev >> bits);
+			INT_reason = tifr;
+			avr_INT = 1;
+		}
+	}
+
+	return *prev = scaled_count;
+}
+
+ /* we use I/O functions to
+    - fake a UART: accept everything written to UDR0 (0xA6); always report ready on UCSR0A (0xA0)
+    - implement 8-bit counter 0 and 16-bit counter 1; with interrupts, but no OCR/ICP */
+
+#define UCSR0A 0xA0
+#define UDR0   0xA6
+
+#define TCNT0  0x26
+#define TCCR0B 0x25
+#define TIMSK0 0x4E
+#define TIFR0  0x15
+
+#define TCNT1L 0x64
+#define TCNT1H 0x65
+#define TCCR1B 0x61
+#define TIMSK1 0x4F
+#define TIFR1  0x16
+
+/* the "temp" register to get 16-bit reads/writes */
+static unsigned char TEMP;
+/* offsets to derive the counters from the free-running prescaler */
+static unsigned long long timer_ofs[2];
 
 void avr_io_in(int port)
 {
-	static short temp = -1;
-	if(port == 0xA0)
+	switch(port) {
+	case UCSR0A:
 		avr_IO[port] = -1;
-	else if(port == 0x26) // TCNT0
-		avr_IO[port] = avr_cycle;
-	else if(port == 0x64) // TCNT1L
-		avr_IO[port] = avr_cycle >> 8, temp = avr_cycle >> 16;
-	else if(port == 0x65) // TCNT1H
-		avr_IO[port] = temp<0? avr_cycle >> 16 : temp, temp = -1;
+		break;
+	case TCNT0: {
+		static unsigned long long timer;
+		copy_timer(&timer, TCCR0B, TIFR0, TIMSK0, 8);
+		avr_IO[port] = timer - timer_ofs[0];
+		break;
+	}
+	case TCNT1L: {
+		static unsigned long long timer;
+		copy_timer(&timer, TCCR1B, TIFR1, TIMSK1, 16);
+		avr_IO[port] = timer - timer_ofs[1];
+		TEMP         = timer - timer_ofs[1] >> 8;
+		break;
+	}
+	case TCNT1H:
+		avr_IO[port] = TEMP;
+		break;
+	}
 }
 
+/* TODO: this should become a function "vetting" the data */
 void avr_io_out(int port)
 {
 	switch(port) {
 		int c;
-	case 0xA6:
+	case UDR0:
 		c = avr_IO[port];
 		if(c == 0x04) {
 			fprintf(stderr, "end of transmission\n");
@@ -106,11 +175,25 @@ void avr_io_out(int port)
 		putchar(c);
 		fflush(stdout);
 		break;
-	case 0x26:
-	case 0x64:
-	case 0x65:
-		// any write to the timers will now simply reset them
-		avr_cycle = 0;
+	case TIFR0:
+	case TIFR1:
+		avr_IO[port] = 0; /* any write clears the flag */
+		break;
+	case TCNT0:
+		timer_ofs[0] = copy_timer(NULL, TCCR0B, 0,0,0);
+		timer_ofs[0] -= (timer_ofs[0] & ~0xFF | avr_IO[port]);
+		break;
+	case TCNT1L:
+		timer_ofs[1] = copy_timer(NULL, TCCR1B, 0,0,0);
+		timer_ofs[1] -= (timer_ofs[1] & ~0xFFFF | TEMP<<8 | avr_IO[port]);
+		break;
+	case TCNT1H:
+		TEMP = avr_IO[port];
+		break;
+	case GTCCR:
+		copy_timer(NULL, 1, 0,0,0); /* resets the prescaler if demanded */
+		if(!(avr_IO[port]&0x80)) avr_IO[port] = 0;
+		break;
 	}
 }
 
@@ -138,7 +221,8 @@ int main(int argc, char **argv)
 			switch(INT_reason) {
 			case I_WDINT:
 				fprintf(stderr, "%s\n", "watchdog interrupt");
-				avr_PC = 0xC;
+				/* avr_PC = 0xC; on ATtiny */
+				avr_PC = 0x18;
 				avr_IO[WDTCR] &=~WDIF;
 				continue;
 			case I_WDRESET:
@@ -146,6 +230,16 @@ int main(int argc, char **argv)
 				avr_reset();
 				avr_IO[MCUSR] |= 0x8; /* set WDRF */
 				break;
+			case TIFR0:
+				avr_IO[TIFR0] &= ~1;
+				avr_PC = 0x2E;
+				if(T_OVF_backlog--) avr_INT = 1;
+				continue;
+			case TIFR1:
+				avr_IO[TIFR1] &= ~1;
+				avr_PC = 0x28;
+				if(T_OVF_backlog--) avr_INT = 1;
+				continue;
 			}
 			break;
 		case 1:
