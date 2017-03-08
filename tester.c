@@ -96,8 +96,9 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 
 	if(avr_IO[GTCCR]&1) prescaler = avr_cycle;
 
+	/* if prev != NULL, assume we are reading the register before the clock increases */
 	int h = 1 - (tccr >> 2);
-	unsigned long long scaled_count = avr_cycle - prescaler >> (2+h)*(tccr-h);
+	unsigned long long scaled_count = avr_cycle -!!prev - prescaler >> (2+h)*(tccr-h);
 	if(!prev) return scaled_count;
 
 	if(*prev >> bits != scaled_count >> bits) {
