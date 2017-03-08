@@ -19,13 +19,24 @@ extern unsigned char avr_SREG;
 
 static volatile enum { I_WDINT, I_WDRESET } INT_reason;
 
+/* dump the emulation state */
+void avr_debug(unsigned long ip)
+{
+	int i;
+	fprintf(stderr, "%10lld: ", avr_cycle);
+	for(i=0; i < 32; i++)
+	fprintf(stderr, "%02x ", avr_ADDR[i+0x00]);
+	fprintf(stderr, "SP=%04x, SREG=%02x, PC=%04lx [%04x]", avr_SP, avr_SREG, ip, avr_FLASH[ip]);
+	fprintf(stderr, "\n");
+}
+
 /* a watchdog process; behaves mostly according to the datasheet,
    except that the timed sequence involving WDCE isn't implemented */
 
 pthread_t wdt_thread;
 
-#define MCUSR (avr_IO[0x34])
-#define WDTCR (avr_IO[0x21])
+#define MCUSR 0x34
+#define WDTCR 0x21
 
 enum wdtcr_bits {
 	WDIF = 1<<7, WDIE = 1<<6, WDCE = 1<<4, WDE = 1<<3
@@ -38,7 +49,7 @@ void *watchdog(void *threadid)
 	fprintf(stderr, "%s\n", "starting watchdog");
 	for(;;) {
 		usleep(1024);
-		unsigned char wdtcr = WDTCR;
+		unsigned char wdtcr = avr_IO[WDTCR];
 		unsigned long cur = avr_last_wdr;
 		unsigned long threshold = 2ul << ((wdtcr&0x20)/4 + (wdtcr&0x7)) % 10;
 		if(cur == last_wdr && wdtcr&0x48 && ++timer > threshold) {
@@ -47,7 +58,7 @@ void *watchdog(void *threadid)
 				wdtcr |= WDIF;
 				if(wdtcr & WDE)
 					wdtcr &=~WDIE;
-				WDTCR = wdtcr;
+				avr_IO[WDTCR] = wdtcr;
 				timer = 0;
 				INT_reason = I_WDINT;
 				avr_INT = 1;
@@ -64,18 +75,6 @@ void *watchdog(void *threadid)
 		}
 	}
 	return 0;
-}
-
-/* dump the emulation state */
-
-void avr_debug(unsigned long ip)
-{
-	int i;
-	fprintf(stderr, "%10lld: ", avr_cycle);
-	for(i=0; i < 32; i++)
-	fprintf(stderr, "%02x ", avr_ADDR[i+0x00]);
-	fprintf(stderr, "SP=%04x, SREG=%02x, PC=%04lx [%04x]", avr_SP, avr_SREG, ip, avr_FLASH[ip]);
-	fprintf(stderr, "\n");
 }
 
  /* two io functions to fake a proper USART */
@@ -130,8 +129,8 @@ int main(int argc, char **argv)
 	fprintf(stderr, "%d bytes read\n", n);
 
 	avr_reset();
-	MCUSR |= 0x1;  /* set PORF */
-	/* WDTCR |= WDE; uncomment this to start the watchdog timer by default */
+	avr_IO[MCUSR] |= 0x1;  /* set PORF */
+	/* avr_IO[WDTCR] |= WDE; uncomment this to start the watchdog timer by default */
 	pthread_create(&wdt_thread, 0, watchdog, 0);
 	do {
 		switch( avr_run() ) {
@@ -140,12 +139,12 @@ int main(int argc, char **argv)
 			case I_WDINT:
 				fprintf(stderr, "%s\n", "watchdog interrupt");
 				avr_PC = 0xC;
-				WDTCR &=~WDIF;
+				avr_IO[WDTCR] &=~WDIF;
 				continue;
 			case I_WDRESET:
 				fprintf(stderr, "%s\n", "watchdog reset");
 				avr_reset();
-				MCUSR |= 0x8; /* set WDRF */
+				avr_IO[MCUSR] |= 0x8; /* set WDRF */
 				break;
 			}
 			break;
@@ -155,8 +154,8 @@ int main(int argc, char **argv)
 		case 2:
 			fprintf(stderr, "%s\n", "breakpoint");
 			do {
-			    avr_debug(avr_PC-1);
-			    getchar();
+				avr_debug(avr_PC);
+				getchar();
 			} while(avr_step() == 0);
 			break;
 		case 3:
