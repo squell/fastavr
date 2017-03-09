@@ -86,7 +86,6 @@ void *watchdog(void *threadid)
 
 #define GTCCR  0x23
 
-static unsigned long long prescaler;
 static unsigned T_OVF_backlog; /* number of overflow events to catch up on */
 
 static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits)
@@ -94,12 +93,23 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 	tccr = avr_IO[tccr] & 7;
 	if(!tccr) return 0;
 
-	if(avr_IO[GTCCR]&1) prescaler = avr_cycle;
+	/* the prescaler is shared for all timers */
+	static unsigned long long last_reset;
+	static unsigned long long prev_cycle;
+	static unsigned long long counted_cycle;
+	if(avr_IO[GTCCR]&1) {
+		if(last_reset != counted_cycle)
+			last_reset = counted_cycle += avr_cycle - prev_cycle;
+	} else {
+		counted_cycle += avr_cycle - prev_cycle;
+	}
+	prev_cycle = avr_cycle;
 
 	/* if prev != NULL, assume we are reading the register before the clock increases */
 	int h = 1 - (tccr >> 2);
-	unsigned long long scaled_count = avr_cycle -!!prev - prescaler >> (2+h)*(tccr-h);
-	if(!prev) return scaled_count;
+	int w = (2+h)*(tccr-h);
+	unsigned long long scaled_count = counted_cycle - !!prev - (last_reset&(1<<w)-1) >> w;
+	if(!prev) return scaled_count+(avr_IO[GTCCR]&1);
 
 	if(*prev >> bits != scaled_count >> bits) {
 		avr_IO[tifr] |= 1;
