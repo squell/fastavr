@@ -146,6 +146,7 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
     - implement 8-bit counter 0 and 16-bit counter 1; with interrupts, but no OCR/ICP */
 
 #define UCSR0A 0xA0
+#define UCSR0B 0xA1
 #define UDR0   0xA6
 
 #define TCNT0  0x26
@@ -182,14 +183,19 @@ volatile unsigned int uart_ptr, uart_end;
 
 void *fake_console(void *threadid)
 {
-	avr_IO[UCSR0A] = 0x60;
-	setbuf(stdout, 0);
 	while(1) {
 		int ptr = uart_ptr;
-		while(ptr != uart_end || avr_IO[UCSR0A] == 0) {
+		while(ptr != uart_end || (avr_IO[UCSR0A]&0x20) == 0) {
 			int c = uart_buffer[ptr];
 			uart_ptr = ptr = (ptr+1) % sizeof uart_buffer;
-			avr_IO[UCSR0A] = 0x60;
+#ifndef USART_DELAY_INTR
+			if(avr_IO[UCSR0B]&0x60 && (avr_IO[UCSR0A]&0x20) == 0)
+				avr_IO[UCSR0A] |= 0x60, INT_reason = UDR0, avr_INT = 1;
+#else
+			if(avr_IO[UCSR0B]&0x60)
+				avr_IO[UCSR0A] |= 0x60, INT_reason = UDR0, avr_INT = 1;
+#endif
+			avr_IO[UCSR0A] |= 0x60;
 			if(c == 0x04) {
 				fprintf(stderr, "end of transmission\n");
 				avr_debug(0);
@@ -205,11 +211,6 @@ void *fake_console(void *threadid)
 void avr_io_in(int port)
 {
 	switch(port) {
-#ifndef THREAD_IO
-	case UCSR0A:
-		avr_IO[port] = 0x60;
-		break;
-#endif
 	case TCNT0: {
 		static unsigned long long timer;
 		copy_timer(&timer, TCCR0B, TIFR0, TIMSK0, 8);
@@ -244,10 +245,15 @@ void avr_io_out(int port)
 #else
 		if(1) {
 #endif
-			avr_IO[UCSR0A] = 0x00;
+			avr_IO[UCSR0A] &= ~0x60;
 			/* fprintf(stderr, "warning: flow control used\n"); */
 		}
+#ifndef USART_DELAY_INTR
+		else if(avr_IO[UCSR0B] & 0x60)
+			avr_IO[UCSR0A] |= 0x60, INT_reason = UDR0, avr_INT = 1;
+#endif
 		uart_end = cur;
+		break;
 #else
 		int c;
 	case UDR0:
@@ -258,18 +264,28 @@ void avr_io_out(int port)
 			exit(0);
 		}
 		putchar(c);
-		fflush(stdout);
-#endif
+		avr_IO[UCSR0A] |= 0x60;
+		if(avr_IO[UCSR0B] & 0x60)
+			INT_reason = UDR0, avr_INT = 1;
 		break;
+#endif
+	case UCSR0A:
+		fprintf(stderr, "writing to UCSR0A not supported\n");
+		abort();
+	case UCSR0B:
+		if(avr_IO[UCSR0A] & avr_IO[port] & 0x20)
+			INT_reason = UDR0, avr_INT = 1;
+		break;
+
 	case EECR:
-		if((avr_IO[EECR]&6) == 6) { /* execute a write */
+		if((avr_IO[port]&6) == 6) { /* execute a write */
 			avr_cycle += 2;
 			if((avr_IO[port] & 0x20) == 0) /* check EEPM1 */
 				eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]] = 0xFF;
 			if((avr_IO[port] & 0x10) == 0) /* check EEPM0 */
 				eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]] &= avr_IO[EEDR];
 			avr_IO[port] &= ~7;
-		} else if(avr_IO[EECR]&1) { /* execute a read */
+		} else if(avr_IO[port]&1) { /* execute a read */
 			avr_cycle += 4;
 			avr_IO[EEDR] = eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]];
 			avr_IO[port] &= ~7;
@@ -332,8 +348,11 @@ int main(int argc, char **argv)
 	}
 
 	signal(SIGINT, ctrlC_handler);
+	if(isatty(fileno(stdout))) setbuf(stdout, 0);
+
 	avr_reset();
 	avr_IO[MCUSR] |= 0x1;  /* set PORF */
+	avr_IO[UCSR0A] = 0x60; /* set TXC and UDRE */
 	/* avr_IO[WDTCR] |= WDE; uncomment this to start the watchdog timer by default */
 	pthread_create(&wdt_thread, 0, watchdog, 0);
 #ifdef THREAD_IO
@@ -369,6 +388,26 @@ int main(int argc, char **argv)
 				avr_PC = 0x28;
 				if(T_OVF_backlog--) avr_INT = 1;
 				continue;
+			case UDR0:
+				switch(avr_IO[UCSR0B] & avr_IO[UCSR0A] & 0x60) {
+				case 0x20: /* UDR empty - do not clear flag */
+				case 0x60:
+					avr_INT = 1; /* always see if UDR is resolved */
+					avr_PC = 0x34;
+					continue;
+				case 0x40: /* TX complete - clear flag, set UDRE */
+					avr_PC = 0x36;
+					avr_IO[UCSR0A] &= ~0x40;
+					continue;
+				default: /* everything ok, perform an IRET (kind of kludgy) */
+					avr_SREG |= 0x80;
+					avr_PC  = avr_ADDR[++avr_SP] << 16;
+					avr_PC |= avr_ADDR[++avr_SP] << 8;
+					avr_PC |= avr_ADDR[++avr_SP];
+					continue;
+				};
+			default:
+				fprintf(stderr, "%s\n", "unknown interrupt");
 			}
 			break;
 		case 1:
