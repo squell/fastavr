@@ -27,7 +27,9 @@ that is in a run-away condition (as described in Atmel's datasheets).
 Building
 ========
 
-This is likely to work:
+To build this project, you will need to have support for developing 32-bit programs installed. E.g. by installing libc6-dev-i386 on Debian.
+
+Once you have that, this is likely to work:
 ```
 make
 ```
