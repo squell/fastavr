@@ -25,7 +25,7 @@
 /* chip options -- consult your datasheet; examples:
 
 Atmega2560: SRAM=8192, FLASHEND=0x1FFFF, IOEND=0x1FF
-Atmega644:  SRAM=4096, FLASHEND= 0x7FFF, IOEND= 0xFF
+Atmega328:  SRAM=2048, FLASHEND= 0x3FFF, IOEND= 0xFF
 Attiny85:   SRAM= 512, FLASHEND=  0xFFF, IOEND= 0x5F
 
 */
