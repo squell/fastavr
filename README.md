@@ -49,12 +49,11 @@ or writing SREG via I/O-space
 * No support for Reduced Core AVR; the DES instruction is only supported
   as a hook for a C function.
   
-* Cycle count is not correct for XMEGA microcontrollers
+* Cycle count is not correct for XMEGA microcontrollers.
 
-* Not all illegal opcodes will result in an error, just like in a
-  real microcontroller.
+* Not all illegal opcodes will result in an error. Neither will out-of-bounds SRAM accesses.
 
-* The core needs to be ported to x86-64
+* The core has not yet been ported to x86-64.
 
 Acknowledgements
 ================

@@ -753,7 +753,13 @@ ld_st:
     mov esi, ebp
     bt ecx, 0
     adc ebp, 0
+.if RAMEND < 256
+    mov cx, bp
+    mov [eax], cl
+    and si, 0xFF
+.else
     mov [eax], bp
+.endif
 
     dec word ptr [avr_SP]  # final stacktweak
 
