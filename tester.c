@@ -320,6 +320,9 @@ int main(int argc, char **argv)
 		}
 		break;
 	} while(1);
+#ifdef THREAD_IO
+	while(uart_ptr != uart_end) pthread_yield();
+#endif
 	fprintf(stderr, "%s\n", "done");
 	avr_debug(avr_PC-1);
 	return 0;
