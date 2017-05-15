@@ -53,6 +53,7 @@ size_t ihex_read(const char *fname, void *image_ptr, size_t capacity)
 	size_t size = 0;
 
 	buffer[1023] = -1;
+	hex_byte_cksum = 0;
 
 	if(!(f = fopen(fname, "r"))) {
 		fprintf(stderr, "%s: could not open file\n", fname);

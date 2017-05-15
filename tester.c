@@ -156,7 +156,7 @@ volatile unsigned int uart_ptr, uart_end;
 void *fake_console(void *threadid)
 {
 	avr_IO[UCSR0A] = 0x60;
-	if(isatty(fileno(stdout))) setbuf(stdout, 0);
+	setbuf(stdout, 0);
 	while(1) {
 		int ptr = uart_ptr;
 		while(ptr != uart_end || avr_IO[UCSR0A] == 0) {
@@ -302,6 +302,7 @@ int main(int argc, char **argv)
 			}
 			break;
 		case 1:
+			/* TODO: allow resuming execution on WDT (or possible USART) interrupts */
 			fprintf(stderr, "%s\n", "mcu idle");
 			break;
 		case 2:
