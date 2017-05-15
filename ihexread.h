@@ -19,3 +19,4 @@
 */
 
 extern int ihex_read(const char *fname, void *image, size_t capacity);
+extern int ihex_write(const char *fname, void *image_ptr, size_t bytes);

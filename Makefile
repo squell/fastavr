@@ -9,7 +9,7 @@ CFLAGS  = -O2 -m32
 LDFLAGS = -m32 -pthread
 ASFLAGS = --32
 
-tester: ihexread.o avr_core_x86.o tester.o
+tester: ihexread.o ihexwrite.o avr_core_x86.o tester.o
 
 clean:
 	rm -f *.o tester
@@ -27,3 +27,7 @@ tinyTwofish/2fish_avr.s:
 
 tester.o: tester.c ihexread.h
 ihexread.c: ihexread.h
+
+eeprom.hex:
+	printf "%4096s" | tr ' ' '\3ff' > eeprom.hex
+	avr-objcopy -I binary -O ihex eeprom.hex

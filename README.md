@@ -20,9 +20,10 @@ Features
 Example
 =======
 
-See the file `tester.c`; this reads an AVR program (in IHEX8 format) and executes it, causing bytes written to
-USART0 to be written to the console. It also defines a watchdog timer that can be used to auto-reset/kill a program
-that is in a run-away condition (as described in Atmel's datasheets).
+See the file `tester.c`; this reads an AVR program (in IHEX8 format) and executes it on a emulated Atmega2560, causing bytes
+written to USART0 to be written to the console.  It also defines a watchdog timer that can be used to auto-reset/kill a program
+that is in a run-away condition (as described in Atmel's datasheets). Also emulated are the programmable timers TIMER0 and
+TIMER1, as well as EEPROM memory (for handling non-volatile data).
 
 Building
 ========
@@ -44,7 +45,7 @@ Todo/Limitations
 the flags. This should only be noticeable when using SES/SEV/SEO/CLS/CLV/CLO
 or writing SREG via I/O-space
 
-* No self-programming ability (SPM instruction, EEPROM).
+* No self-programming ability (no SPM instruction).
 
 * No support for Reduced Core AVR; the DES instruction is only supported
   as a hook for a C function.

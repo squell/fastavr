@@ -17,7 +17,20 @@ extern unsigned short int avr_FLASH[];
 extern unsigned short int avr_SP;
 extern unsigned char avr_SREG;
 
+static unsigned char eeprom[0x10000];
+static size_t eeprom_nonvolatile;
+static const char *eeprom_file;
+
 static volatile enum { I_WDINT, I_WDRESET } INT_reason;
+
+/* note: consider calling this at regular intervals from a thread? */
+void eeprom_commit(void)
+{
+	if(eeprom_nonvolatile && ihex_write(eeprom_file, eeprom, eeprom_nonvolatile) != 0) {
+		fprintf(stderr, "error writing %s\n", eeprom_file);
+		exit(2);
+	}
+}
 
 /* dump the emulation state */
 void avr_debug(unsigned long ip)
@@ -28,6 +41,7 @@ void avr_debug(unsigned long ip)
 	fprintf(stderr, "%02x ", avr_ADDR[i+0x00]);
 	fprintf(stderr, "SP=%04x, SREG=%02x, PC=%04lx [%04x]", avr_SP, avr_SREG, ip, avr_FLASH[ip]);
 	fprintf(stderr, "\n");
+	eeprom_commit();
 }
 
 /* a watchdog process; behaves mostly according to the datasheet,
@@ -125,6 +139,7 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 
  /* we use I/O functions to
     - fake a UART: accept everything written to UDR0 (0xA6); always report ready on UCSR0A (0xA0)
+    - implement EEPROM data accesses (note: timed sequence not implemented, nor interrupt-driven EEPROM)
     - implement 8-bit counter 0 and 16-bit counter 1; with interrupts, but no OCR/ICP */
 
 #define UCSR0A 0xA0
@@ -140,6 +155,11 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 #define TCCR1B 0x61
 #define TIMSK1 0x4F
 #define TIFR1  0x16
+
+#define EEARH  0x22
+#define EEARL  0x21
+#define EEDR   0x20
+#define EECR   0x1F
 
 /* the "temp" register to get 16-bit reads/writes */
 static unsigned char TEMP;
@@ -173,7 +193,6 @@ void *fake_console(void *threadid)
 		usleep(THREAD_IO);
 	}
 }
-
 #endif
 
 void avr_io_in(int port)
@@ -231,6 +250,21 @@ void avr_io_out(int port)
 		fflush(stdout);
 #endif
 		break;
+	case EECR:
+		if((avr_IO[EECR]&6) == 6) { /* execute a write */
+			avr_cycle += 2;
+			if((avr_IO[port] & 0x20) == 0) /* check EEPM1 */
+				eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]] = 0xFF;
+			if((avr_IO[port] & 0x10) == 0) /* check EEPM0 */
+				eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]] &= avr_IO[EEDR];
+			avr_IO[port] &= ~7;
+		} else if(avr_IO[EECR]&1) { /* execute a read */
+			avr_cycle += 4;
+			avr_IO[EEDR] = eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]];
+			avr_IO[port] &= ~7;
+		}
+		break;
+
 	case TIFR0:
 	case TIFR1:
 		avr_IO[port] = 0; /* any write clears the flag */
@@ -257,7 +291,7 @@ int main(int argc, char **argv)
 {
 	memset(avr_FLASH, 0xFF, 0x40000);
 	if(!argv[1]) {
-		fprintf(stderr, "usage: tester [file.hex]\n");
+		fprintf(stderr, "usage: tester flash.hex [eeprom.hex]]\n");
 		return 2;
 	}
 	int n = ihex_read(argv[1], avr_FLASH, 0x40000);
@@ -266,6 +300,16 @@ int main(int argc, char **argv)
 		return 2;
 	}
 	fprintf(stderr, "%d bytes read\n", n);
+
+	memset(eeprom, 0xFF, sizeof eeprom);
+	if(argv[2]) {
+		eeprom_nonvolatile = ihex_read(eeprom_file=argv[2], eeprom, sizeof eeprom);
+		if(eeprom_nonvolatile < 0) {
+			fprintf(stderr, "could not read %s\n", argv[2]);
+			return 2;
+		}
+	    fprintf(stderr, "%d bytes nonvolatile eeprom\n", eeprom_nonvolatile);
+	}
 
 	avr_reset();
 	avr_IO[MCUSR] |= 0x1;  /* set PORF */
