@@ -3,6 +3,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
 #include "ihexread.h"
 
 extern volatile unsigned long long avr_cycle;
@@ -21,7 +22,9 @@ static unsigned char eeprom[0x10000];
 static size_t eeprom_nonvolatile;
 static const char *eeprom_file;
 
-static volatile enum { I_WDINT, I_WDRESET } INT_reason;
+static volatile enum { I_WDINT, I_WDRESET, I_RESET } INT_reason;
+
+#define reset break
 
 /* note: consider calling this at regular intervals from a thread? */
 void eeprom_commit(void)
@@ -77,10 +80,10 @@ void *watchdog(void *threadid)
 				INT_reason = I_WDINT;
 				avr_INT = 1;
 			} else if(wdtcr & WDE) {
-				timer = 0;
+				timer = last_wdr = 0;
 				INT_reason = I_WDRESET;
 				avr_INT = 1;
-				while(avr_INT)  /* force-quit the emulator */
+				while(avr_INT && !(avr_IO[MCUSR]&0x8)) /* force-quit the emulator */
 					avr_IO[0x3F] = 0x80;
 			}
 		} else if(cur != last_wdr) {
@@ -287,6 +290,15 @@ void avr_io_out(int port)
 	}
 }
 
+static void ctrlC_handler(int sig)
+{
+	INT_reason = I_RESET;
+	avr_IO[0x3F] = 0x80; /* not as good as the watchdog force-quit */
+	avr_INT = 1;
+	static int count;    /* fallback */
+	if(avr_INT && count++ >= 16) abort();
+}
+
 int main(int argc, char **argv)
 {
 	memset(avr_FLASH, 0xFF, 0x40000);
@@ -311,6 +323,7 @@ int main(int argc, char **argv)
 	    fprintf(stderr, "%d bytes nonvolatile eeprom\n", eeprom_nonvolatile);
 	}
 
+	signal(SIGINT, ctrlC_handler);
 	avr_reset();
 	avr_IO[MCUSR] |= 0x1;  /* set PORF */
 	/* avr_IO[WDTCR] |= WDE; uncomment this to start the watchdog timer by default */
@@ -332,7 +345,12 @@ int main(int argc, char **argv)
 				fprintf(stderr, "%s\n", "watchdog reset");
 				avr_reset();
 				avr_IO[MCUSR] |= 0x8; /* set WDRF */
-				break;
+				reset;
+			case I_RESET:
+				fprintf(stderr, "%s\n", "external reset");
+				avr_reset();
+				avr_IO[MCUSR] |= 0x2; /* set EXTRF */
+				reset;
 			case TIFR0:
 				avr_IO[TIFR0] &= ~1;
 				avr_PC = 0x2E;
