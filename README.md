@@ -47,8 +47,8 @@ or writing SREG via I/O-space
 
 * No self-programming ability (no SPM instruction).
 
-* No support for Reduced Core AVR; the DES instruction is only supported
-  as a hook for a C function.
+* No support for Reduced Core AVR; the DES instruction is supported
+  as a hook for a C function (demonstrated in the `des-support` branch)
   
 * Cycle count is not correct for XMEGA microcontrollers.
 

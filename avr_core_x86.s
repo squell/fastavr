@@ -88,7 +88,7 @@ BIGPC    = FLASHEND > 0xFFFF
    			as above, but for SBI/CBI and SBIS/SBIC instructions
 			(default: call avr_in and avr_out)
 
-   void avr_des_round(int round, byte* data, byte* key)
+   void avr_des_round(byte* data, byte* key, int round, int decrypt)
    			called when a DES instruction is executed (default: abort)
 */
 
@@ -1265,13 +1265,16 @@ interrupt:
 
 .p2align 3
 f_des:
-    mov edx, [avr_ADDR+edx]
-    lea eax, [avr_ADDR+8]
+    bt ebx, 4 # copy H to carry
+    sbb eax, eax
     push eax
-    push offset avr_ADDR
     push edx
+    mov eax, offset avr_ADDR+8
+    push eax
+    sub eax, 8
+    push eax
     call avr_des_round
-    add esp, 12
+    add esp, 16
     resume
 
 unhandled:
