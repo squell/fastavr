@@ -267,7 +267,6 @@ static unsigned long long rot(unsigned long long x, int n, int bits)
 static unsigned long long ks(int n, unsigned long long key)
 {
 	unsigned long long l, r;
-	key = bit_select(key, layout(PC1), sizeof PC1);
 	n = 2*n - n/8 ^ (n==0 | n==15);
 	l = rot(key & mask(28), n, 28);
 	r = rot(key >> 28, n, 28);
@@ -284,9 +283,27 @@ static unsigned long f(unsigned long long half, unsigned long long subkey)
 	return bit_select(y, P, sizeof P);
 }
 
-static unsigned long long des(unsigned long long block, unsigned long long key)
+static unsigned long long des_round(unsigned long long block, unsigned long long key, int round, int swap)
+{
+	key   = bit_select(key, layout(PC1), sizeof PC1);
+	block = bit_select(block, layout(IP), sizeof IP);
+	block ^= f(block>>32, ks(round,key));
+	if(swap) block = rot(block,32,64);
+	return bit_select(block, layout(IIP), sizeof IIP);
+}
+
+static unsigned long long des_encrypt(unsigned long long block, unsigned long long key)
 {
 	int i;
+	for(i=0; i<16; i++)
+		block = des_round(block, key, i, 15-i);
+	return block;
+}
+
+static unsigned long long des_fast_encrypt(unsigned long long block, unsigned long long key)
+{
+	int i;
+	key   = bit_select(key, layout(PC1), sizeof PC1);
 	block = bit_select(block, layout(IP), sizeof IP);
 	for(i=0; i<16; i++) {
 		block ^= f(block>>32, ks(i,key));
@@ -303,8 +320,9 @@ int main()
 	unsigned long long output;
 	unsigned long long data = revbit(0x0123456789abcdef,64);
 	unsigned long long key = revbit(0b0001001100110100010101110111100110011011101111001101111111110001,64);
-	printf("%16llx\n", revbit(des(data,key),64));
-	dump(des(data,key),64);
+	printf("%16llx\n", revbit(des_encrypt(data,key),64));
+	dump(des_encrypt(data,key),64);
+	dump(des_fast_encrypt(data,key),64);
 
 	data = revbyte(0x0123456789abcdef,8);
 	key = revbyte(0b0001001100110100010101110111100110011011101111001101111111110001,8);
