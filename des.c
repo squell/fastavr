@@ -84,17 +84,6 @@ static const unsigned char IP[] = {
 	63, 55, 47, 39, 31, 23, 15, 7,
 };
 
-static const unsigned char IIP[] = {
-	40, 8, 48, 16, 56, 24, 64, 32,
-	39, 7, 47, 15, 55, 23, 63, 31,
-	38, 6, 46, 14, 54, 22, 62, 30,
-	37, 5, 45, 13, 53, 21, 61, 29,
-	36, 4, 44, 12, 52, 20, 60, 28,
-	35, 3, 43, 11, 51, 19, 59, 27,
-	34, 2, 42, 10, 50, 18, 58, 26,
-	33, 1, 41, 9, 49, 17, 57, 25,
-};
-
 static unsigned char IPmsb[] = {
 	7, 15, 23, 31, 39, 47, 55, 63,
 	5, 13, 21, 29, 37, 45, 53, 61,
@@ -106,17 +95,6 @@ static unsigned char IPmsb[] = {
 	2, 10, 18, 26, 34, 42, 50, 58,
 };
 
-static unsigned char IIPmsb[] = {
-	25, 57, 17, 49, 9, 41, 1, 33,
-	26, 58, 18, 50, 10, 42, 2, 34,
-	27, 59, 19, 51, 11, 43, 3, 35,
-	28, 60, 20, 52, 12, 44, 4, 36,
-	29, 61, 21, 53, 13, 45, 5, 37,
-	30, 62, 22, 54, 14, 46, 6, 38,
-	31, 63, 23, 55, 15, 47, 7, 39,
-	32, 64, 24, 56, 16, 48, 8, 40,
-};
-
 static const unsigned char IPbyte[] = {
 	63, 55, 47, 39, 31, 23, 15, 7,
 	61, 53, 45, 37, 29, 21, 13, 5,
@@ -126,17 +104,6 @@ static const unsigned char IPbyte[] = {
 	62, 54, 46, 38, 30, 22, 14, 6,
 	60, 52, 44, 36, 28, 20, 12, 4,
 	58, 50, 42, 34, 26, 18, 10, 2,
-};
-
-static const unsigned char IIPbyte[] = {
-	32, 64, 24, 56, 16, 48, 8, 40,
-	31, 63, 23, 55, 15, 47, 7, 39,
-	30, 62, 22, 54, 14, 46, 6, 38,
-	29, 61, 21, 53, 13, 45, 5, 37,
-	28, 60, 20, 52, 12, 44, 4, 36,
-	27, 59, 19, 51, 11, 43, 3, 35,
-	26, 58, 18, 50, 10, 42, 2, 34,
-	25, 57, 17, 49, 9, 41, 1, 33,
 };
 
 static const unsigned char P[] = {
@@ -288,6 +255,15 @@ static unsigned long long bit_select_slow(unsigned long long data, const unsigne
 	return x;
 }
 
+static unsigned long long bit_select_inv_slow(unsigned long long data, const unsigned char *perm, int bits)
+{
+	unsigned long long x = 0;
+	int n;
+	for(n=0; n<bits; n++, data>>=1)
+		x |= (data&1) << perm[n]-1;
+	return x;
+}
+
 static unsigned long long bit_select_fast(unsigned long long data, unsigned long long *perm, int chunks, int bits)
 {
 	unsigned long long x = 0;
@@ -301,12 +277,14 @@ static unsigned long long bit_select_fast(unsigned long long data, unsigned long
 #if SPEEDUP64 && SPEEDUP56
 #define elems(array) (sizeof array/sizeof *array)
 #define bit_select(data, table, bits) bit_select_fast(data, (void*)table##F, elems(table##F), bits)
+#define bit_select_inv(data, table, bits) bit_select_fast(data, (void*)I##table##F, elems(table##F), bits)
 #else
 #define PC2byte PC2
 #define PC2msb PC2
 #define Pbyte P
 #define Pmsb P
 #define bit_select(data, table, bits) bit_select_slow(data, layout(table), sizeof table)
+#define bit_select_inv(data, table, bits) bit_select_inv_slow(data, layout(table), sizeof table)
 #endif
 
 /* whats FIPS calls a left shift is actually a right shift */
@@ -345,7 +323,7 @@ unsigned long long des_round(unsigned long long block, unsigned long long key, i
 	block = bit_select(block, IP, 64);
 	block ^= f(block>>32, ks(round,key));
 	if(swap) block = rot(block,32,64);
-	return bit_select(block, IIP, 64);
+	return bit_select_inv(block, IP, 64);
 }
 
 static unsigned long long des_encrypt(unsigned long long block, unsigned long long key)
@@ -376,7 +354,7 @@ static unsigned long long des_fast_encrypt(unsigned long long block, unsigned lo
 		r ^= f(l, ks(2*i+1,key));
 	}
 	block = (unsigned long long)l << 32 | r;
-	block = bit_select(block, IIP, 64);
+	block = bit_select_inv(block, IP, 64);
 	return block;
 }
 
@@ -399,13 +377,13 @@ static unsigned long long des_fast_encrypt_sched(unsigned long long block, unsig
 		r ^= f(l, sched[2*i+1]);
 	}
 	block = (unsigned long long)l << 32 | r;
-	block = bit_select(block, IIP, 64);
+	block = bit_select_inv(block, IP, 64);
 	return block;
 }
 
-#define lut_loop(table,orig,i,j,bits) \
+#define lut_loop(table,orig,i,j,bits,inv) \
 	for(i=0; i<elems(table); i++) for(j=0; j<elems(*table); j++) \
-		table[i][j] = bit_select_slow((unsigned long long)j<<bits/elems(table)*i, orig, sizeof orig);
+		table[i][j] = bit_select##inv##_slow((unsigned long long)j<<bits/elems(table)*i, orig, sizeof orig);
 
 void des_init(void)
 {
@@ -415,10 +393,10 @@ void des_init(void)
 	char speedup56_is_divisor_of_56[1-(56%SPEEDUP56<<1)];
 	for(i=0; i<8; i++) for(j=0; j<64; j++)
 		SP[i][j] = bit_select_slow(S[i][j] << 4*i, P, sizeof P);
-	lut_loop(PC1F,layout(PC1),i,j,64);
-	lut_loop(PC2F,PC2,i,j,56)
-	lut_loop(IPF,layout(IP),i,j,  64);
-	lut_loop(IIPF,layout(IIP),i,j,64);
+	lut_loop(PC1F,layout(PC1),i,j,64,);
+	lut_loop(PC2F,PC2,i,j,56,)
+	lut_loop(IPF,layout(IP),i,j,  64,);
+	lut_loop(IIPF,layout(IP),i,j,64,_inv);
 	#endif
 }
 
