@@ -537,6 +537,15 @@ void avr_io_out(int port, unsigned char prev)
 	}
 }
 
+void avr_des_round(unsigned long long* data, unsigned long long* key, int round, int decrypt)
+{
+	extern void des_init(void);
+	extern unsigned long long des_round(unsigned long long block, unsigned long long *key, int round, int decrypt);
+	static char initialized;
+	if(!initialized) des_init(), initialized++;
+	*data = des_round(*data, key, decrypt?15-round:round, decrypt);
+}
+
 static void ctrl_handler(int sig)
 {
 	static int count;    /* fallback */
