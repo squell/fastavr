@@ -44,8 +44,8 @@ static unsigned long long revbit(unsigned long long x)
 static void dump(unsigned long long x)
 {
 	int bits;
-	for(bits=64; bits--; x>>=1)
-		printf("%d", x&1);
+	for(bits=64; bits--; )
+		printf("%d", x>>bits&1);
 	printf("\n");
 }
 
@@ -63,15 +63,15 @@ static void dumphex(unsigned long long x)
 /* note; there are several ways to layout bits in DES
 
   FIPS	      -- leftmost bit in DES is in the least significant bit
-  C	      -- leftmost bit in DES is the most significant bit
+  C	      -- leftmost bit in DES is the most significant bit (AVR)
   "bytewise"  -- leftmost bit in DES is the most significant bit in the left-most byte (OpenSSL)
 
   This code has been internally designed around the FIPS style (which requires bit-reversing the S-box).
-  The final byte ordering can always be selected by fiddling with the IP, IIP and PC1 tables.
+  The data and key input/output is expected to be in the C bit layout.
 
  */
 
-#define layout(table) table
+#define layout(table) table##msb
 
 static const unsigned char IP[] = {
 	58, 50, 42, 34, 26, 18, 10, 2,
@@ -504,33 +504,33 @@ static void NBS_test(void)
 	int i;
 	printf("IP and E test\n");
 	for(i=0; i<64; i++) {
-		unsigned long long key = revbit(0x0101010101010101ull);
-		unsigned long long cipher = 1ull << i;
-		printf("%016llx %016llx %016llx\n", revbit(key), revbit(des_encrypt(cipher,key)), revbit(cipher));
+		unsigned long long key = (0x0101010101010101ull);
+		unsigned long long cipher = 1ull << 63-i;
+		printf("%016llx %016llx %016llx\n", (key), (des_encrypt(cipher,key)), (cipher));
 		des_encrypt(des_encrypt(cipher,key),key) == cipher || (abort(),0);
 	}
 
 	printf("PC1 and PC2 test\n");
 	for(i=0; i<64; i++) {
-		unsigned long long key = 1ull << i ^ revbit(0x0101010101010101ull) ^ 1ull << (i&~7)+7;
+		unsigned long long key = 1ull << 63-i ^ (0x0101010101010101ull) ^ 1ull << 56-(i&~7);
 		unsigned long long plain = 0;
 		if((i+1) % 8 == 0) continue;
-		printf("%016llx %016llx %016llx\n", revbit(key), revbit(plain), revbit(des_encrypt(plain,key)));
+		printf("%016llx %016llx %016llx\n", (key), (plain), (des_encrypt(plain,key)));
 		des_decrypt(des_encrypt(plain,key),key) == plain || (abort(),0);
 	}
 
 	printf("P test\n");
 	for(i=0; i<32; i++) {
-		unsigned long long key = revbit(P_keys[i]);
+		unsigned long long key = (P_keys[i]);
 		unsigned long long plain = 0;
-		printf("%016llx %016llx %016llx\n", revbit(key), revbit(plain), revbit(des_encrypt(plain,key)));
+		printf("%016llx %016llx %016llx\n", (key), (plain), (des_encrypt(plain,key)));
 	}
 
 	printf("S test\n");
 	for(i=0; i<19; i++) {
-		unsigned long long key = revbit(S_keys[i]);
-		unsigned long long plain = revbit(S_plain[i]);;
-		printf("%016llx %016llx %016llx\n", revbit(key), revbit(plain), revbit(des_encrypt(plain,key)));
+		unsigned long long key = (S_keys[i]);
+		unsigned long long plain = (S_plain[i]);;
+		printf("%016llx %016llx %016llx\n", (key), (plain), (des_encrypt(plain,key)));
 	}
 }
 
@@ -553,11 +553,11 @@ int main()
 {
 	DES_key_schedule sched;
 	unsigned long long output;
-	unsigned long long data = revbit(0x0123456789abcdef);
-	unsigned long long key = revbit(0b0001001100110100010101110111100110011011101111001101111111110001);
+	unsigned long long data = 0x0123456789abcdef;
+	unsigned long long key = 0b0001001100110100010101110111100110011011101111001101111111110001;
 	unsigned long long keys[16];
 	des_init();
-	dumphex(revbyte(revbit(des_encrypt(data,key))));
+	dumphex(revbyte(des_encrypt(data,key)));
 	dump(des_encrypt(data,key));
 	dump(des_fast_encrypt(data,key));
 	des_sched(key, keys);
@@ -567,13 +567,12 @@ int main()
 	key = revbyte(0b0001001100110100010101110111100110011011101111001101111111110001);
 	DES_set_key_unchecked((void*)&key, &sched);
 	DES_ecb_encrypt((void*)&data, (void*)&output, &sched, DES_ENCRYPT);
-	dump(revbit(revbyte(output)));
+	dump(revbyte(output));
 	dumphex(output);
 
-	data = revbit(0x0123456789abcdef);
-	key = revbit(0b0001001100110100010101110111100110011011101111001101111111110001);
+	data = 0x0123456789abcdef;
+	key = 0b0001001100110100010101110111100110011011101111001101111111110001;
 	puts("===");
-	#define dumphex(x) dumphex(revbit(x))
 	dumphex(data=des_round(data, key, 0, 1));
 	dumphex(data=des_round(data, key, 1, 1));
 	dumphex(data=des_round(data, key, 2, 1));
