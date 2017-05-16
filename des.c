@@ -19,6 +19,8 @@
  */
 
 #include <stdlib.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 
 static unsigned long long revbyte(unsigned long long x)
@@ -44,6 +46,17 @@ static void dump(unsigned long long x)
 	int bits;
 	for(bits=64; bits--; x>>=1)
 		printf("%d", x&1);
+	printf("\n");
+}
+
+static void dumphex(unsigned long long x)
+{
+	char tab[16] = "0123456789abcdef";
+	unsigned char buf[sizeof x];
+	memcpy(buf, &x, sizeof x);
+	int n;
+	for(n=0; n<8; n++)
+		printf("%c%c", tab[buf[n]>>4&0xF], tab[buf[n]&0xF]);
 	printf("\n");
 }
 
@@ -544,7 +557,7 @@ int main()
 	unsigned long long key = revbit(0b0001001100110100010101110111100110011011101111001101111111110001);
 	unsigned long long keys[16];
 	des_init();
-	printf("%16llx\n", revbit(des_encrypt(data,key)));
+	dumphex(revbyte(revbit(des_encrypt(data,key))));
 	dump(des_encrypt(data,key));
 	dump(des_fast_encrypt(data,key));
 	des_sched(key, keys);
@@ -555,6 +568,29 @@ int main()
 	DES_set_key_unchecked((void*)&key, &sched);
 	DES_ecb_encrypt((void*)&data, (void*)&output, &sched, DES_ENCRYPT);
 	dump(revbit(revbyte(output)));
+	dumphex(output);
+
+	data = revbit(0x0123456789abcdef);
+	key = revbit(0b0001001100110100010101110111100110011011101111001101111111110001);
+	puts("===");
+	#define dumphex(x) dumphex(revbit(x))
+	dumphex(data=des_round(data, key, 0, 1));
+	dumphex(data=des_round(data, key, 1, 1));
+	dumphex(data=des_round(data, key, 2, 1));
+	dumphex(data=des_round(data, key, 3, 1));
+	dumphex(data=des_round(data, key, 4, 1));
+	dumphex(data=des_round(data, key, 5, 1));
+	dumphex(data=des_round(data, key, 6, 1));
+	dumphex(data=des_round(data, key, 7, 1));
+	dumphex(data=des_round(data, key, 8, 1));
+	dumphex(data=des_round(data, key, 9, 1));
+	dumphex(data=des_round(data, key, 10, 1));
+	dumphex(data=des_round(data, key, 11, 1));
+	dumphex(data=des_round(data, key, 12, 1));
+	dumphex(data=des_round(data, key, 13, 1));
+	dumphex(data=des_round(data, key, 14, 1));
+	dumphex(data=des_round(data, key, 15, 0));
+	puts("===");
 	benchmark();
 }
 #elif defined(TEST)
