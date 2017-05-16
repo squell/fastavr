@@ -45,7 +45,7 @@ static void dump(unsigned long long x)
 {
 	int bits;
 	for(bits=64; bits--; )
-		printf("%d", x>>bits&1);
+		printf("%d", (int)(x>>bits&1));
 	printf("\n");
 }
 
@@ -375,7 +375,7 @@ static unsigned long long des_fast_encrypt(unsigned long long block, unsigned lo
 		l ^= f(r, ks(2*i,  key));
 		r ^= f(l, ks(2*i+1,key));
 	}
-	block = l << 32 | r;
+	block = (unsigned long long)l << 32 | r;
 	block = bit_select(block, IIP, 64);
 	return block;
 }
@@ -398,7 +398,7 @@ static unsigned long long des_fast_encrypt_sched(unsigned long long block, unsig
 		l ^= f(r, sched[2*i]);
 		r ^= f(l, sched[2*i+1]);
 	}
-	block = l << 32 | r;
+	block = (unsigned long long)l << 32 | r;
 	block = bit_select(block, IIP, 64);
 	return block;
 }
