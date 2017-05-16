@@ -249,14 +249,49 @@ static const unsigned char PC2[] = {
 	46, 42, 50, 36, 29, 32,
 };
 
+/* size of lookup tables for 56- and 64-bit permutations in bits;
+   must be a divisor of the bit-size; maximum practical value is 16 */
+#define SPEEDUP64 8 /* recommended: 4 or 8, max 16 */
+#define SPEEDUP56 7 /* recommend: 4 or 7/8, max 14 */
+
+/* precompute tables */
+#if SPEEDUP64 && SPEEDUP56
+static unsigned long SP[8][64];
+static unsigned long long PC2F[56/SPEEDUP56][1<<SPEEDUP56];
+static unsigned long long PC1F[64/SPEEDUP64][1<<SPEEDUP64];
+static unsigned long long IPF [64/SPEEDUP64][1<<SPEEDUP64];
+static unsigned long long IIPF[64/SPEEDUP64][1<<SPEEDUP64];
+#endif
+
 /* routines */
-static unsigned long long bit_select(unsigned long long data, const unsigned char *perm, int bits)
+static unsigned long long bit_select_slow(unsigned long long data, const unsigned char *perm, int bits)
 {
 	unsigned long long x = 0;
 	while(bits--)
 		x = x<<1 | data >> perm[bits]-1 & 1;
 	return x;
 }
+
+static unsigned long long bit_select_fast(unsigned long long data, unsigned long long *perm, int chunks, int bits)
+{
+	unsigned long long x = 0;
+	int i;
+	bits /= chunks;
+	for(i=0; i < chunks; i++, data>>=bits)
+		x |= perm[i<<bits | data&mask(bits)];
+	return x;
+}
+
+#if SPEEDUP64 && SPEEDUP56
+#define elems(array) (sizeof array/sizeof *array)
+#define bit_select(data, table, bits) bit_select_fast(data, (void*)table##F, elems(table##F), bits)
+#else
+#define PC2byte PC2
+#define PC2msb PC2
+#define Pbyte P
+#define Pmsb P
+#define bit_select(data, table, bits) bit_select_slow(data, layout(table), sizeof table)
+#endif
 
 /* whats FIPS calls a left shift is actually a right shift */
 static unsigned long long rot(unsigned long long x, int n, int bits)
@@ -270,7 +305,7 @@ static unsigned long long ks(int n, unsigned long long key)
 	n = 2*n - n/8 ^ (n==0 | n==15);
 	l = rot(key & mask(28), n, 28);
 	r = rot(key >> 28, n, 28);
-	return bit_select(l | r<<28, PC2, sizeof PC2);
+	return bit_select(l | r<<28, PC2, 56);
 }
 
 static unsigned long f(unsigned long long half, unsigned long long subkey)
@@ -278,18 +313,23 @@ static unsigned long f(unsigned long long half, unsigned long long subkey)
 	unsigned long long x = half>>31 | half<<1 | half<<33;
 	unsigned long y = 0;
 	int i;
-	for(i=0; i<8; i++)
-		y |= S[i][(x>>4*i ^ subkey>>6*i)& 0x3F] << 4*i;
-	return bit_select(y, P, sizeof P);
+	for(i=0; i<8; i++,x>>=4,subkey>>=6)
+	#if SPEEDUP64 && SPEEDUP56
+		y |= SP[i][(x ^ subkey) & 0x3F];
+	return y;
+	#else
+		y |= S[i][(x ^ subkey) & 0x3F] << 4*i;
+	return bit_select(y, P, 32);
+	#endif
 }
 
 static unsigned long long des_round(unsigned long long block, unsigned long long key, int round, int swap)
 {
-	key   = bit_select(key, layout(PC1), sizeof PC1);
-	block = bit_select(block, layout(IP), sizeof IP);
+	key   = bit_select(key, PC1, 64);
+	block = bit_select(block, IP, 64);
 	block ^= f(block>>32, ks(round,key));
 	if(swap) block = rot(block,32,64);
-	return bit_select(block, layout(IIP), sizeof IIP);
+	return bit_select(block, IIP, 64);
 }
 
 static unsigned long long des_encrypt(unsigned long long block, unsigned long long key)
@@ -300,18 +340,45 @@ static unsigned long long des_encrypt(unsigned long long block, unsigned long lo
 	return block;
 }
 
+static unsigned long long des_decrypt(unsigned long long block, unsigned long long key)
+{
+	int i;
+	for(i=16; i--; )
+		block = des_round(block, key, i, i);
+	return block;
+}
+
 static unsigned long long des_fast_encrypt(unsigned long long block, unsigned long long key)
 {
 	int i;
-	key   = bit_select(key, layout(PC1), sizeof PC1);
-	block = bit_select(block, layout(IP), sizeof IP);
+	key   = bit_select(key, PC1, 64);
+	block = bit_select(block, IP, 64);
 	for(i=0; i<16; i++) {
 		block ^= f(block>>32, ks(i,key));
 		block = rot(block,32,64);
 	}
 	block = rot(block,32,64);
-	block = bit_select(block, layout(IIP), sizeof IIP);
+	block = bit_select(block, IIP, 64);
 	return block;
+}
+
+#define lut_loop(table,orig,i,j,bits) \
+	for(i=0; i<elems(table); i++) for(j=0; j<elems(*table); j++) \
+		table[i][j] = bit_select_slow((unsigned long long)j<<bits/elems(table)*i, orig, sizeof orig);
+
+void des_init(void)
+{
+	#if SPEEDUP64 && SPEEDUP56
+	int i,j;
+	char speedup64_is_divisor_of_64[1-(64%SPEEDUP64<<1)];
+	char speedup56_is_divisor_of_56[1-(56%SPEEDUP56<<1)];
+	for(i=0; i<8; i++) for(j=0; j<64; j++)
+		SP[i][j] = bit_select_slow(S[i][j] << 4*i, P, sizeof P);
+	lut_loop(PC1F,layout(PC1),i,j,64);
+	lut_loop(PC2F,PC2,i,j,56)
+	lut_loop(IPF,layout(IP),i,j,  64);
+	lut_loop(IIPF,layout(IIP),i,j,64);
+	#endif
 }
 
 int main()
@@ -320,6 +387,7 @@ int main()
 	unsigned long long output;
 	unsigned long long data = revbit(0x0123456789abcdef,64);
 	unsigned long long key = revbit(0b0001001100110100010101110111100110011011101111001101111111110001,64);
+	des_init();
 	printf("%16llx\n", revbit(des_encrypt(data,key),64));
 	dump(des_encrypt(data,key),64);
 	dump(des_fast_encrypt(data,key),64);
