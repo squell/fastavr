@@ -350,14 +350,39 @@ static unsigned long long des_decrypt(unsigned long long block, unsigned long lo
 
 static unsigned long long des_fast_encrypt(unsigned long long block, unsigned long long key)
 {
+	unsigned long l, r;
 	int i;
 	key   = bit_select(key, PC1, 64);
 	block = bit_select(block, IP, 64);
-	for(i=0; i<16; i++) {
-		block ^= f(block>>32, ks(i,key));
-		block = rot(block,32,64);
+	l = block&mask(32), r = block>>32;
+	for(i=0; i<8; i++) {
+		l ^= f(r, ks(2*i,  key));
+		r ^= f(l, ks(2*i+1,key));
 	}
-	block = rot(block,32,64);
+	block = l << 32 | r;
+	block = bit_select(block, IIP, 64);
+	return block;
+}
+
+static void des_sched(unsigned long long key, unsigned long long *sched)
+{
+	int i;
+	key = bit_select(key, PC1, 64);
+	for(i=0; i<16; i++)
+		sched[i] = ks(i, key);
+}
+
+static unsigned long long des_fast_encrypt_sched(unsigned long long block, unsigned long long *sched)
+{
+	unsigned long l, r;
+	int i;
+	block = bit_select(block, IP, 64);
+	l = block&mask(32), r = block>>32;
+	for(i=0; i<8; i++) {
+		l ^= f(r, sched[2*i]);
+		r ^= f(l, sched[2*i+1]);
+	}
+	block = l << 32 | r;
 	block = bit_select(block, IIP, 64);
 	return block;
 }
@@ -387,10 +412,13 @@ int main()
 	unsigned long long output;
 	unsigned long long data = revbit(0x0123456789abcdef,64);
 	unsigned long long key = revbit(0b0001001100110100010101110111100110011011101111001101111111110001,64);
+	unsigned long long keys[16];
 	des_init();
 	printf("%16llx\n", revbit(des_encrypt(data,key),64));
 	dump(des_encrypt(data,key),64);
 	dump(des_fast_encrypt(data,key),64);
+	des_sched(key, keys);
+	dump(des_fast_encrypt_sched(data,keys),64);
 
 	data = revbyte(0x0123456789abcdef,8);
 	key = revbyte(0b0001001100110100010101110111100110011011101111001101111111110001,8);
