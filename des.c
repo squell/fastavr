@@ -1,4 +1,3 @@
-#include <openssl/des.h>
 /*
 
  A silly DES implementation.
@@ -19,27 +18,31 @@
 
  */
 
+#include <stdlib.h>
 #include <stdio.h>
 
-unsigned long long revbyte(unsigned long long x, int bits)
+static unsigned long long revbyte(unsigned long long x)
 {
 	unsigned long long y = 0;
-	for( ; bits--; x >>= 8)
+	int n;
+	for(n=8; n--; x >>= 8)
 		y = y<<8 | x&0xFF;
 	return y;
 }
 
-unsigned long long revbit(unsigned long long x, int bits)
+static unsigned long long revbit(unsigned long long x)
 {
 	unsigned long long y = 0;
-	for( ; bits--; x >>= 1)
+	int bits;
+	for(bits=64; bits--; x >>= 1)
 		y = y<<1 | x&1;
 	return y;
 }
 
-void dump(unsigned long long x, int bits)
+static void dump(unsigned long long x)
 {
-	for( ; bits--; x>>=1)
+	int bits;
+	for(bits=64; bits--; x>>=1)
 		printf("%d", x&1);
 	printf("\n");
 }
@@ -323,7 +326,7 @@ static unsigned long f(unsigned long long half, unsigned long long subkey)
 	#endif
 }
 
-static unsigned long long des_round(unsigned long long block, unsigned long long key, int round, int swap)
+unsigned long long des_round(unsigned long long block, unsigned long long key, int round, int swap)
 {
 	key   = bit_select(key, PC1, 64);
 	block = bit_select(block, IP, 64);
@@ -406,23 +409,158 @@ void des_init(void)
 	#endif
 }
 
+static void NBS_test(void)
+{
+	unsigned long long P_keys[] = {
+		0x1046913489980131,
+		0x1007103489988020,
+		0x10071034C8980120,
+		0x1046103489988020,
+		0x1086911519190101,
+		0x1086911519580101,
+		0x5107B01519580101,
+		0x1007B01519190101,
+		0x3107915498080101,
+		0x3107919498080101,
+		0x10079115B9080140,
+		0x3107911598080140,
+		0x1007D01589980101,
+		0x9107911589980101,
+		0x9107D01589190101,
+		0x1007D01598980120,
+		0x1007940498190101,
+		0x0107910491190401,
+		0x0107910491190101,
+		0x0107940491190401,
+		0x19079210981A0101,
+		0x1007911998190801,
+		0x10079119981A0801,
+		0x1007921098190101,
+		0x100791159819010B,
+		0x1004801598190101,
+		0x1004801598190102,
+		0x1004801598190108,
+		0x1002911498100104,
+		0x1002911598190104,
+		0x1002911598100201,
+		0x1002911698100101,
+	},
+	S_keys[] = {
+		0x7CA110454A1A6E57,
+		0x0131D9619DC1376E,
+		0x07A1133E4A0B2686,
+		0x3849674C2602319E,
+		0x04B915BA43FEB5B6,
+		0x0113B970FD34F2CE,
+		0x0170F175468FB5E6,
+		0x43297FAD38E373FE,
+		0x07A7137045DA2A16,
+		0x04689104C2FD3B2F,
+		0x37D06BB516CB7546,
+		0x1F08260D1AC2465E,
+		0x584023641ABA6176,
+		0x025816164629B007,
+		0x49793EBC79B3258F,
+		0x4FB05E1515AB73A7,
+		0x49E95D6D4CA229BF,
+		0x018310DC409B26D6,
+		0x1C587F1C13924FEF,
+	},
+	S_plain[] = {
+		0x01A1D6D039776742,
+		0x5CD54CA83DEF57DA,
+		0x0248D43806F67172,
+		0x51454B582DDF440A,
+		0x42FD443059577FA2,
+		0x059B5E0851CF143A,
+		0x0756D8E0774761D2,
+		0x762514B829BF486A,
+		0x3BDD119049372802,
+		0x26955F6835AF609A,
+		0x164D5E404F275232,
+		0x6B056E18759F5CCA,
+		0x004BD6EF09176062,
+		0x480D39006EE762F2,
+		0x437540C8698F3CFA,
+		0x072D43A077075292,
+		0x02FE55778117F12A,
+		0x1D9D5C5018F728C2,
+		0x305532286D6F295A,
+	};
+
+	int i;
+	printf("IP and E test\n");
+	for(i=0; i<64; i++) {
+		unsigned long long key = revbit(0x0101010101010101ull);
+		unsigned long long cipher = 1ull << i;
+		printf("%016llx %016llx %016llx\n", revbit(key), revbit(des_encrypt(cipher,key)), revbit(cipher));
+		des_encrypt(des_encrypt(cipher,key),key) == cipher || (abort(),0);
+	}
+
+	printf("PC1 and PC2 test\n");
+	for(i=0; i<64; i++) {
+		unsigned long long key = 1ull << i ^ revbit(0x0101010101010101ull) ^ 1ull << (i&~7)+7;
+		unsigned long long plain = 0;
+		if((i+1) % 8 == 0) continue;
+		printf("%016llx %016llx %016llx\n", revbit(key), revbit(plain), revbit(des_encrypt(plain,key)));
+		des_decrypt(des_encrypt(plain,key),key) == plain || (abort(),0);
+	}
+
+	printf("P test\n");
+	for(i=0; i<32; i++) {
+		unsigned long long key = revbit(P_keys[i]);
+		unsigned long long plain = 0;
+		printf("%016llx %016llx %016llx\n", revbit(key), revbit(plain), revbit(des_encrypt(plain,key)));
+	}
+
+	printf("S test\n");
+	for(i=0; i<19; i++) {
+		unsigned long long key = revbit(S_keys[i]);
+		unsigned long long plain = revbit(S_plain[i]);;
+		printf("%016llx %016llx %016llx\n", revbit(key), revbit(plain), revbit(des_encrypt(plain,key)));
+	}
+}
+
+#if defined(BENCH)
+static int benchmark()
+{
+	unsigned long long init = 0x123456789abcdef;
+	unsigned long long data, key;
+	int i = 20000000;
+	key = data = revbit(init);
+	while(i--) {
+		data = key = BENCH(data, key);
+	}
+	volatile _ = data;
+}
+
+#include <openssl/des.h>
+
 int main()
 {
 	DES_key_schedule sched;
 	unsigned long long output;
-	unsigned long long data = revbit(0x0123456789abcdef,64);
-	unsigned long long key = revbit(0b0001001100110100010101110111100110011011101111001101111111110001,64);
+	unsigned long long data = revbit(0x0123456789abcdef);
+	unsigned long long key = revbit(0b0001001100110100010101110111100110011011101111001101111111110001);
 	unsigned long long keys[16];
 	des_init();
-	printf("%16llx\n", revbit(des_encrypt(data,key),64));
-	dump(des_encrypt(data,key),64);
-	dump(des_fast_encrypt(data,key),64);
+	printf("%16llx\n", revbit(des_encrypt(data,key)));
+	dump(des_encrypt(data,key));
+	dump(des_fast_encrypt(data,key));
 	des_sched(key, keys);
-	dump(des_fast_encrypt_sched(data,keys),64);
+	dump(des_fast_encrypt_sched(data,keys));
 
-	data = revbyte(0x0123456789abcdef,8);
-	key = revbyte(0b0001001100110100010101110111100110011011101111001101111111110001,8);
+	data = revbyte(0x0123456789abcdef);
+	key = revbyte(0b0001001100110100010101110111100110011011101111001101111111110001);
 	DES_set_key_unchecked((void*)&key, &sched);
 	DES_ecb_encrypt((void*)&data, (void*)&output, &sched, DES_ENCRYPT);
-	dump(revbit(revbyte(output,8),64),64);
+	dump(revbit(revbyte(output)));
+	benchmark();
 }
+#elif defined(TEST)
+int main()
+{
+	des_init();
+	NBS_test();
+}
+#endif
