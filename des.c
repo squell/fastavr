@@ -244,6 +244,7 @@ static unsigned long long PC2F[56/SPEEDUP56][1<<SPEEDUP56];
 static unsigned long long PC1F[64/SPEEDUP64][1<<SPEEDUP64];
 static unsigned long long IPF [64/SPEEDUP64][1<<SPEEDUP64];
 static unsigned long long IIPF[64/SPEEDUP64][1<<SPEEDUP64];
+static unsigned long long IPC1F[64/SPEEDUP64][1<<SPEEDUP64];
 #endif
 
 /* routines */
@@ -302,6 +303,23 @@ static unsigned long long ks(int n, unsigned long long key)
 	return bit_select(l | r<<28, PC2, 56);
 }
 
+static unsigned long long kstep(int n, unsigned long long *key, int reverse)
+{
+	unsigned long long l, r;
+	n = 1 + (n!=0 & n!=1 & n!=8 & n!=15);
+	if(!reverse) {
+		l = rot(*key & mask(28), n, 28);
+		r = rot(*key >> 28, n, 28);
+		return bit_select(*key = l | r<<28, PC2, 56);
+	} else {
+		unsigned long long tmp = bit_select(*key, PC2, 56);
+		l = rot(*key & mask(28), 28-n, 28);
+		r = rot(*key >> 28, 28-n, 28);
+		*key = l | r<<28;
+		return tmp;
+	}
+}
+
 static unsigned long f(unsigned long long half, unsigned long long subkey)
 {
 	unsigned long long x = half>>31 | half<<1 | half<<33;
@@ -317,12 +335,15 @@ static unsigned long f(unsigned long long half, unsigned long long subkey)
 	#endif
 }
 
-unsigned long long des_round(unsigned long long block, unsigned long long key, int round, int swap)
+unsigned long long des_round(unsigned long long block, unsigned long long *keyp, int round, int decrypt)
 {
-	key   = bit_select(key, PC1, 64);
+	unsigned long long key = bit_select(*keyp, PC1, 64);
 	block = bit_select(block, IP, 64);
-	block ^= f(block>>32, ks(round,key));
-	if(swap) block = rot(block,32,64);
+
+	block ^= f(block>>32, kstep(round,&key,decrypt));
+	if(round != 15*!decrypt) block = rot(block,32,64);
+
+	*keyp = *keyp & 0x0101010101010101ull | bit_select_inv(key, PC1, 64);
 	return bit_select_inv(block, IP, 64);
 }
 
@@ -330,7 +351,7 @@ static unsigned long long des_encrypt(unsigned long long block, unsigned long lo
 {
 	int i;
 	for(i=0; i<16; i++)
-		block = des_round(block, key, i, 15-i);
+		block = des_round(block, &key, i, 0);
 	return block;
 }
 
@@ -338,7 +359,7 @@ static unsigned long long des_decrypt(unsigned long long block, unsigned long lo
 {
 	int i;
 	for(i=16; i--; )
-		block = des_round(block, key, i, i);
+		block = des_round(block, &key, i, 1);
 	return block;
 }
 
@@ -397,6 +418,7 @@ void des_init(void)
 	lut_loop(PC2F,PC2,i,j,56,)
 	lut_loop(IPF,layout(IP),i,j,  64,);
 	lut_loop(IIPF,layout(IP),i,j,64,_inv);
+	lut_loop(IPC1F,layout(PC1),i,j,64,_inv);
 	#endif
 }
 
@@ -551,22 +573,22 @@ int main()
 	data = 0x0123456789abcdef;
 	key = 0b0001001100110100010101110111100110011011101111001101111111110001;
 	puts("===");
-	dumphex(data=des_round(data, key, 0, 1));
-	dumphex(data=des_round(data, key, 1, 1));
-	dumphex(data=des_round(data, key, 2, 1));
-	dumphex(data=des_round(data, key, 3, 1));
-	dumphex(data=des_round(data, key, 4, 1));
-	dumphex(data=des_round(data, key, 5, 1));
-	dumphex(data=des_round(data, key, 6, 1));
-	dumphex(data=des_round(data, key, 7, 1));
-	dumphex(data=des_round(data, key, 8, 1));
-	dumphex(data=des_round(data, key, 9, 1));
-	dumphex(data=des_round(data, key, 10, 1));
-	dumphex(data=des_round(data, key, 11, 1));
-	dumphex(data=des_round(data, key, 12, 1));
-	dumphex(data=des_round(data, key, 13, 1));
-	dumphex(data=des_round(data, key, 14, 1));
-	dumphex(data=des_round(data, key, 15, 0));
+	dumphex(data=des_round(data, &key, 0, 0));
+	dumphex(data=des_round(data, &key, 1, 0));
+	dumphex(data=des_round(data, &key, 2, 0));
+	dumphex(data=des_round(data, &key, 3, 0));
+	dumphex(data=des_round(data, &key, 4, 0));
+	dumphex(data=des_round(data, &key, 5, 0));
+	dumphex(data=des_round(data, &key, 6, 0));
+	dumphex(data=des_round(data, &key, 7, 0));
+	dumphex(data=des_round(data, &key, 8, 0));
+	dumphex(data=des_round(data, &key, 9, 0));
+	dumphex(data=des_round(data, &key, 10, 0));
+	dumphex(data=des_round(data, &key, 11, 0));
+	dumphex(data=des_round(data, &key, 12, 0));
+	dumphex(data=des_round(data, &key, 13, 0));
+	dumphex(data=des_round(data, &key, 14, 0));
+	dumphex(data=des_round(data, &key, 15, 0));
 	puts("===");
 	benchmark();
 }
