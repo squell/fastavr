@@ -123,16 +123,6 @@ static const unsigned char IIPbyte[] = {
 	25, 57, 17, 49, 9, 41, 1, 33,
 };
 
-/* not actually used -- only listed for completeness */
-static const unsigned char E[] = {
-	32, 1, 2, 3, 4, 5, 4, 5,
-	6, 7, 8, 9, 8, 9, 10, 11,
-	12, 13, 12, 13, 14, 15, 16, 17,
-	16, 17, 18, 19, 20, 21, 20, 21,
-	22, 23, 24, 25, 24, 25, 26, 27,
-	28, 29, 28, 29, 30, 31, 32, 1,
-};
-
 static const unsigned char P[] = {
 	16, 7, 20, 21, 29, 12, 28, 17,
 	1, 15, 23, 26, 5, 18, 31, 10,
@@ -286,19 +276,11 @@ static unsigned long long ks(int n, unsigned long long key)
 
 static unsigned long f(unsigned long long half, unsigned long long subkey)
 {
-	#ifdef USE_E
-	unsigned long long x = bit_select(half, E, sizeof E) ^ subkey;
-	#else
 	unsigned long long x = half>>31 | half<<1 | half<<33;
-	#endif
 	unsigned long y = 0;
 	int i;
 	for(i=0; i<8; i++)
-	#ifdef USE_E
-		y |= S[i][x>>6*i & 0x3F] << 4*i;
-	#else
 		y |= S[i][(x>>4*i ^ subkey>>6*i)& 0x3F] << 4*i;
-	#endif
 	return bit_select(y, P, sizeof P);
 }
 
