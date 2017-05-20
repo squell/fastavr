@@ -169,7 +169,11 @@ static unsigned char TEMP;
 /* offsets to derive the counters from the free-running prescaler */
 static unsigned long long timer_ofs[2];
 
+#ifdef BAUD
+#define THREAD_IO (10000000/BAUD)
+#else
 #define THREAD_IO 100
+#endif
 #ifdef THREAD_IO
 pthread_t tty_thread;
 
@@ -235,7 +239,11 @@ void avr_io_out(int port)
 		cur = uart_end;
 		uart_buffer[cur] = avr_IO[port];
 		cur = (cur+1) % sizeof uart_buffer;
+#ifndef BAUD
 		if(cur == uart_ptr) {
+#else
+		if(1) {
+#endif
 			avr_IO[UCSR0A] = 0x00;
 			/* fprintf(stderr, "warning: flow control used\n"); */
 		}
