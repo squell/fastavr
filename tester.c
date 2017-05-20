@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <termios.h>
 #include <string.h>
 #include <signal.h>
 #include "ihexread.h"
@@ -211,6 +213,15 @@ void *fake_console(void *threadid)
 void avr_io_in(int port)
 {
 	switch(port) {
+		int c;
+	case UCSR0A:
+		if((avr_IO[port] & 0x80) == 0 && (c=getchar()) != EOF)
+			avr_IO[port] |= 0x80, ungetc(c, stdin);
+		break;
+	case UDR0:
+		avr_IO[port] = getchar();
+		avr_IO[UCSR0A] &= ~0x80;
+		break;
 	case TCNT0: {
 		static unsigned long long timer;
 		copy_timer(&timer, TCCR0B, TIFR0, TIMSK0, 8);
@@ -349,6 +360,14 @@ int main(int argc, char **argv)
 
 	signal(SIGINT, ctrlC_handler);
 	if(isatty(fileno(stdout))) setbuf(stdout, NULL);
+
+	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_NONBLOCK);
+	if(isatty(STDIN_FILENO)) {
+		struct termios ctrl;
+		tcgetattr(STDIN_FILENO, &ctrl);
+		ctrl.c_lflag &= ~ICANON; /* make stdin unbuffered */
+		tcsetattr(STDIN_FILENO, TCSANOW, &ctrl);
+	}
 
 	avr_reset();
 	avr_IO[MCUSR] |= 0x1;  /* set PORF */
