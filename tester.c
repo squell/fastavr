@@ -91,7 +91,7 @@ void *watchdog(void *threadid)
 			last_wdr = cur;
 		}
 	}
-	return 0;
+	return NULL;
 }
 
 /* scale the cpu cycle count according to TCCRxB, and generate an overflow interrupt if demanded
@@ -348,15 +348,15 @@ int main(int argc, char **argv)
 	}
 
 	signal(SIGINT, ctrlC_handler);
-	if(isatty(fileno(stdout))) setbuf(stdout, 0);
+	if(isatty(fileno(stdout))) setbuf(stdout, NULL);
 
 	avr_reset();
 	avr_IO[MCUSR] |= 0x1;  /* set PORF */
 	avr_IO[UCSR0A] = 0x60; /* set TXC and UDRE */
 	/* avr_IO[WDTCR] |= WDE; uncomment this to start the watchdog timer by default */
-	pthread_create(&wdt_thread, 0, watchdog, 0);
+	pthread_create(&wdt_thread, NULL, watchdog, NULL);
 #ifdef THREAD_IO
-	pthread_create(&tty_thread, 0, fake_console, 0);
+	pthread_create(&tty_thread, NULL, fake_console, NULL);
 #endif
 	do {
 		switch( avr_run() ) {
