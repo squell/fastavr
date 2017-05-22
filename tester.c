@@ -214,13 +214,14 @@ void avr_io_in(int port)
 {
 	switch(port) {
 		int c;
-	case UCSR0A:
-		if((avr_IO[port] & 0x80) == 0 && (c=getchar()) != EOF)
-			avr_IO[port] |= 0x80, ungetc(c, stdin);
-		break;
 	case UDR0:
 		avr_IO[port] = getchar();
 		avr_IO[UCSR0A] &= ~0x80;
+	case UCSR0A:
+		if((avr_IO[UCSR0A] & 0x80) == 0 && (c=getchar()) != EOF)
+			avr_IO[UCSR0A] |= 0x80, ungetc(c, stdin);
+		if(avr_IO[UCSR0B] & avr_IO[UCSR0A] & 0x80)
+			INT_reason = UDR0, avr_INT = 1;
 		break;
 	case TCNT0: {
 		static unsigned long long timer;
@@ -284,6 +285,7 @@ void avr_io_out(int port)
 		fprintf(stderr, "writing to UCSR0A not supported\n");
 		abort();
 	case UCSR0B:
+		avr_io_in(UCSR0A);
 		if(avr_IO[UCSR0A] & avr_IO[port] & 0x20)
 			INT_reason = UDR0, avr_INT = 1;
 		break;
@@ -418,11 +420,17 @@ int main(int argc, char **argv)
 					avr_PC = 0x36;
 					avr_IO[UCSR0A] &= ~0x40;
 					continue;
-				default: /* everything ok, perform an IRET (kind of kludgy) */
-					avr_SREG |= 0x80;
-					avr_PC  = avr_ADDR[++avr_SP] << 16;
-					avr_PC |= avr_ADDR[++avr_SP] << 8;
-					avr_PC |= avr_ADDR[++avr_SP];
+				default:
+					if(avr_IO[UCSR0B] & avr_IO[UCSR0A] & 0x80) {
+						avr_INT = 1; /* always check if RXC is resolved */
+						avr_PC = 0x32;
+					} else {
+						/* everything ok, perform an IRET (kind of kludgy) */
+						avr_SREG |= 0x80;
+						avr_PC  = avr_ADDR[++avr_SP] << 16;
+						avr_PC |= avr_ADDR[++avr_SP] << 8;
+						avr_PC |= avr_ADDR[++avr_SP];
+					}
 					continue;
 				};
 			default:
