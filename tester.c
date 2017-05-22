@@ -172,38 +172,44 @@ static unsigned char TEMP;
 /* offsets to derive the counters from the free-running prescaler */
 static unsigned long long timer_ofs[2];
 
-#ifdef BAUD
-#define THREAD_IO (10000000/BAUD)
-#else
 #define THREAD_IO 100
-#endif
+
+#define OR(x,y) __sync_fetch_and_or(&x,y)
+#define AND(x,y) __sync_fetch_and_and(&x,y)
+#define INCR(x) __sync_add_and_fetch(&x,1)
+#define DECR(x) __sync_fetch_and_sub(&x,1)
+
 #ifdef THREAD_IO
 pthread_t tty_thread;
 
-volatile char uart_buffer[256];
-volatile unsigned int uart_ptr, uart_end;
+volatile unsigned char uart_buffer[256];
+volatile unsigned int uart_num;
 
 void *fake_console(void *threadid)
 {
+	int ptr = 0;
 	while(1) {
-		int ptr = uart_ptr;
-		while(ptr != uart_end || (avr_IO[UCSR0A]&0x20) == 0) {
-			int c = uart_buffer[ptr];
-			uart_ptr = ptr = (ptr+1) % sizeof uart_buffer;
-#ifndef USART_DELAY_INTR
-			if(avr_IO[UCSR0B]&0x60 && (avr_IO[UCSR0A]&0x20) == 0)
-				avr_IO[UCSR0A] |= 0x60, INT_reason = UDR0, avr_INT = 1;
+		while(uart_num > 0) {
+			int c = uart_buffer[ptr], old_ucsr;
+			ptr = (ptr+1) % sizeof uart_buffer;
+			old_ucsr = OR(avr_IO[UCSR0A], 0x60);
+			DECR(uart_num);
+#ifndef DELAY_IO
+			if((old_ucsr & 0x60) == 0 && avr_IO[UCSR0B] & 0x60)
+				INT_reason = UDR0, avr_INT = 1;
 #else
-			if(avr_IO[UCSR0B]&0x60)
-				avr_IO[UCSR0A] |= 0x60, INT_reason = UDR0, avr_INT = 1;
+			if(avr_IO[UCSR0B] & 0x60)
+				INT_reason = UDR0, avr_INT = 1;
 #endif
-			avr_IO[UCSR0A] |= 0x60;
 			if(c == 0x04) {
 				fprintf(stderr, "end of transmission\n");
 				avr_debug(0);
 				exit(0);
 			}
 			putchar(c);
+#ifdef BAUD
+			usleep(10000000/BAUD);
+#endif
 		}
 		usleep(THREAD_IO);
 	}
@@ -216,10 +222,10 @@ void avr_io_in(int port)
 		int c;
 	case UDR0:
 		avr_IO[port] = getchar();
-		avr_IO[UCSR0A] &= ~0x80;
+		AND(avr_IO[UCSR0A], ~0x80);
 	case UCSR0A:
 		if((avr_IO[UCSR0A] & 0x80) == 0 && (c=getchar()) != EOF)
-			avr_IO[UCSR0A] |= 0x80, ungetc(c, stdin);
+			OR(avr_IO[UCSR0A], 0x80), ungetc(c, stdin);
 		if(avr_IO[UCSR0B] & avr_IO[UCSR0A] & 0x80)
 			INT_reason = UDR0, avr_INT = 1;
 		break;
@@ -245,26 +251,22 @@ void avr_io_in(int port)
 /* TODO: this should become a function "vetting" the data */
 void avr_io_out(int port)
 {
+	static unsigned int cur = 0;
 	switch(port) {
 #ifdef THREAD_IO
-		unsigned short cur;
 	case UDR0:
-		cur = uart_end;
 		uart_buffer[cur] = avr_IO[port];
 		cur = (cur+1) % sizeof uart_buffer;
-#ifndef BAUD
-		if(cur == uart_ptr) {
-#else
-		if(1) {
-#endif
-			avr_IO[UCSR0A] &= ~0x60;
+		AND(avr_IO[UCSR0A], ~0x60);
+		if(INCR(uart_num) < sizeof uart_buffer) {
+#  ifndef DELAY_IO
+			OR(avr_IO[UCSR0A], 0x60);
+			if(avr_IO[UCSR0B] & 0x60)
+				INT_reason = UDR0, avr_INT = 1;
+#  endif
+		} else {
 			/* fprintf(stderr, "warning: flow control used\n"); */
 		}
-#ifndef USART_DELAY_INTR
-		else if(avr_IO[UCSR0B] & 0x60)
-			avr_IO[UCSR0A] |= 0x60, INT_reason = UDR0, avr_INT = 1;
-#endif
-		uart_end = cur;
 		break;
 #else
 		int c;
@@ -276,7 +278,7 @@ void avr_io_out(int port)
 			exit(0);
 		}
 		putchar(c);
-		avr_IO[UCSR0A] |= 0x60;
+		OR(avr_IO[UCSR0A], 0x60);
 		if(avr_IO[UCSR0B] & 0x60)
 			INT_reason = UDR0, avr_INT = 1;
 		break;
@@ -361,7 +363,7 @@ int main(int argc, char **argv)
 	}
 
 	signal(SIGINT, ctrlC_handler);
-	if(isatty(fileno(stdout))) setbuf(stdout, NULL);
+	if(isatty(STDOUT_FILENO)) setbuf(stdout, NULL);
 
 	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_NONBLOCK);
 	if(isatty(STDIN_FILENO)) {
@@ -418,7 +420,7 @@ int main(int argc, char **argv)
 					continue;
 				case 0x40: /* TX complete - clear flag, set UDRE */
 					avr_PC = 0x36;
-					avr_IO[UCSR0A] &= ~0x40;
+					AND(avr_IO[UCSR0A], ~0x40);
 					continue;
 				default:
 					if(avr_IO[UCSR0B] & avr_IO[UCSR0A] & 0x80) {
@@ -458,7 +460,7 @@ int main(int argc, char **argv)
 		break;
 	} while(1);
 #ifdef THREAD_IO
-	while(uart_ptr != uart_end) pthread_yield();
+	while(uart_num) pthread_yield();
 #endif
 	fprintf(stderr, "%s\n", "done");
 	avr_debug(avr_PC-1);
