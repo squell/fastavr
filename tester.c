@@ -30,7 +30,7 @@ static unsigned char eeprom[0x10000];
 static size_t eeprom_nonvolatile;
 static const char *eeprom_file;
 
-static volatile enum { I_WDINT, I_WDRESET, I_RESET } INT_reason;
+static volatile enum { I_WDINT, I_WDRESET, I_RESET, I_ASYNC } INT_reason;
 
 #define reset break
 
@@ -225,6 +225,15 @@ void *fake_console(void *threadid)
 }
 #endif
 
+/* signal handler to handle arrival of data */
+void io_input_handler(int sig)
+{
+	if((avr_IO[UCSR0A] & 0x80) == 0) {
+		INT_reason = I_ASYNC;
+		avr_INT = 1;
+	}
+}
+
 void avr_io_in(int port)
 {
 	switch(port) {
@@ -376,7 +385,9 @@ int main(int argc, char **argv)
 	signal(SIGINT, ctrlC_handler);
 	if(isatty(STDOUT_FILENO)) setbuf(stdout, NULL);
 
-	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_NONBLOCK);
+	signal(SIGIO, io_input_handler);
+	fcntl(STDIN_FILENO, F_SETOWN, getpid());
+	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_ASYNC | O_NONBLOCK);
 	if(isatty(STDIN_FILENO)) {
 		struct termios ctrl;
 		tcgetattr(STDIN_FILENO, &ctrl);
@@ -412,6 +423,13 @@ int main(int argc, char **argv)
 				avr_reset();
 				avr_IO[MCUSR] |= 0x2; /* set EXTRF */
 				reset;
+			case I_ASYNC:
+				avr_SREG |= 0x80;
+				avr_PC  = avr_ADDR[++avr_SP] << 16;
+				avr_PC |= avr_ADDR[++avr_SP] << 8;
+				avr_PC |= avr_ADDR[++avr_SP];
+				avr_io_in(UCSR0A);
+				continue;
 			case TIFR0:
 				avr_IO[TIFR0] &= ~1;
 				avr_PC = 0x2E;
