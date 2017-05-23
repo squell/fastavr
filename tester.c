@@ -30,7 +30,7 @@ static unsigned char eeprom[0x10000];
 static size_t eeprom_nonvolatile;
 static const char *eeprom_file;
 
-static volatile enum { I_WDINT, I_WDRESET, I_RESET, I_ASYNC } INT_reason;
+static volatile enum { I_WDINT, I_WDRESET, I_RESET } INT_reason;
 
 #define reset break
 
@@ -181,7 +181,7 @@ static unsigned char TEMP;
 /* offsets to derive the counters from the free-running prescaler */
 static unsigned long long timer_ofs[2];
 
-#define THREAD_IO 100
+//#define THREAD_IO 100
 
 #define OR(x,y) __sync_fetch_and_or(&x,y)
 #define AND(x,y) __sync_fetch_and_and(&x,y)
@@ -229,7 +229,7 @@ void *fake_console(void *threadid)
 void io_input_handler(int sig)
 {
 	if((avr_IO[UCSR0A] & 0x80) == 0) {
-		INT_reason = I_ASYNC;
+		INT_reason = UDR0;
 		avr_INT = 1;
 	}
 }
@@ -423,13 +423,6 @@ int main(int argc, char **argv)
 				avr_reset();
 				avr_IO[MCUSR] |= 0x2; /* set EXTRF */
 				reset;
-			case I_ASYNC:
-				avr_SREG |= 0x80;
-				avr_PC  = avr_ADDR[++avr_SP] << 16;
-				avr_PC |= avr_ADDR[++avr_SP] << 8;
-				avr_PC |= avr_ADDR[++avr_SP];
-				avr_io_in(UCSR0A);
-				continue;
 			case TIFR0:
 				avr_IO[TIFR0] &= ~1;
 				avr_PC = 0x2E;
@@ -441,6 +434,7 @@ int main(int argc, char **argv)
 				if(T_OVF_backlog--) avr_INT = 1;
 				continue;
 			case UDR0:
+				avr_io_in(UCSR0A);
 				switch(avr_IO[UCSR0B] & avr_IO[UCSR0A] & 0x60) {
 				case 0x20: /* UDR empty - do not clear flag */
 				case 0x60:
