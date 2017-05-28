@@ -19,9 +19,9 @@
 */
 
 #include <stdio.h>
-#include <stddef.h>
+#include "ihexread.h"
 
-int ihex_write(const char *fname, void *image_ptr, size_t bytes)
+ssize_t ihex_write(const char *fname, void *image_ptr, size_t bytes)
 {
 	unsigned char *image = image_ptr;
 	size_t addr = 0;

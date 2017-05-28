@@ -19,7 +19,7 @@
 */
 
 #include <stdio.h>
-#include <stddef.h>
+#include "ihexread.h"
 
 static int nibble(const char c)
 {
@@ -44,7 +44,7 @@ static int hex_byte(const char *p)
 	return value;
 }
 
-size_t ihex_read(const char *fname, void *image_ptr, size_t capacity)
+ssize_t ihex_read(const char *fname, void *image_ptr, size_t capacity)
 {
 	unsigned char *image = image_ptr;
 	FILE *f;

@@ -1,7 +1,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <sched.h>
 #include <unistd.h>
+#include <time.h>
 #include <fcntl.h>
 #include <termios.h>
 #include <string.h>
@@ -19,6 +21,10 @@ extern unsigned char avr_ADDR[];
 extern unsigned short int avr_FLASH[];
 extern unsigned short int avr_SP;
 extern unsigned char avr_SREG;
+
+int avr_run();
+int avr_step();
+void avr_reset();
 
 static unsigned char eeprom[0x10000];
 static size_t eeprom_nonvolatile;
@@ -48,6 +54,9 @@ void avr_debug(unsigned long ip)
 	fprintf(stderr, "\n");
 	eeprom_commit();
 }
+
+/* usleep is deprecated in POSIX */
+#define usleep(us) { const struct timespec ts = { us/1000000, (us%1000000)*1000 }; nanosleep(&ts, NULL); }
 
 /* a watchdog process; behaves mostly according to the datasheet,
    except that the timed sequence involving WDCE isn't implemented */
@@ -354,12 +363,13 @@ int main(int argc, char **argv)
 
 	memset(eeprom, 0xFF, sizeof eeprom);
 	if(argv[2]) {
-		eeprom_nonvolatile = ihex_read(eeprom_file=argv[2], eeprom, sizeof eeprom);
-		if(eeprom_nonvolatile < 0) {
+		int n = ihex_read(eeprom_file=argv[2], eeprom, sizeof eeprom);
+		if(n < 0) {
 			fprintf(stderr, "could not read %s\n", argv[2]);
 			return 2;
 		}
-	    fprintf(stderr, "%d bytes nonvolatile eeprom\n", eeprom_nonvolatile);
+		fprintf(stderr, "%d bytes nonvolatile eeprom\n", n);
+		eeprom_nonvolatile = n;
 	}
 
 	signal(SIGINT, ctrlC_handler);
@@ -460,7 +470,7 @@ int main(int argc, char **argv)
 		break;
 	} while(1);
 #ifdef THREAD_IO
-	while(uart_num) pthread_yield();
+	while(uart_num) sched_yield();
 #endif
 	fprintf(stderr, "%s\n", "done");
 	avr_debug(avr_PC-1);
