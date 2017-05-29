@@ -181,7 +181,7 @@ static unsigned char TEMP;
 /* offsets to derive the counters from the free-running prescaler */
 static unsigned long long timer_ofs[2];
 
-#define THREAD_IO 10
+//#define THREAD_IO 10
 
 #define OR(x,y) __sync_fetch_and_or(&x,y)
 #define AND(x,y) __sync_fetch_and_and(&x,y)
@@ -260,6 +260,15 @@ void *fake_receiver(void *threadid)
 	return NULL;
 }
 #endif
+
+/* signal handler to handle arrival of data */
+void io_input_handler(int sig)
+{
+	if((avr_IO[UCSR0A] & 0x80) == 0) {
+		INT_reason = UDR0;
+		avr_INT = 1;
+	}
+}
 
 void avr_io_in(int port)
 {
@@ -445,7 +454,9 @@ int main(int argc, char **argv)
 	pthread_create(&tty_thread, NULL, fake_console, NULL);
 	pthread_create(&rbr_thread, NULL, fake_receiver, NULL);
 #else
-	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_NONBLOCK);
+	signal(SIGIO, io_input_handler);
+	fcntl(STDIN_FILENO, F_SETOWN, getpid());
+	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_ASYNC | O_NONBLOCK);
 #endif
 	do {
 		switch( avr_run() ) {
@@ -478,6 +489,7 @@ int main(int argc, char **argv)
 				if(T_OVF_backlog--) avr_INT = 1;
 				continue;
 			case UDR0:
+				avr_io_in(UCSR0A);
 				switch(avr_IO[UCSR0B] & avr_IO[UCSR0A] & 0x60) {
 				case 0x20: /* UDR empty - do not clear flag */
 				case 0x60:
