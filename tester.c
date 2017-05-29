@@ -181,7 +181,7 @@ static unsigned char TEMP;
 /* offsets to derive the counters from the free-running prescaler */
 static unsigned long long timer_ofs[2];
 
-#define THREAD_IO 100
+#define THREAD_IO 10
 
 #define OR(x,y) __sync_fetch_and_or(&x,y)
 #define AND(x,y) __sync_fetch_and_and(&x,y)
@@ -223,11 +223,63 @@ void *fake_console(void *threadid)
 		usleep(THREAD_IO);
 	}
 }
+
+pthread_t rbr_thread;
+
+volatile unsigned char rdbr_buffer[256];
+volatile unsigned int rdbr_num = sizeof rdbr_buffer;
+
+void *fake_receiver(void *threadid)
+{
+	int ptr = 0;
+	sched_yield();
+	while(1) {
+		int c = getchar(), old_ucsr;
+		if(c != EOF) {
+			rdbr_buffer[ptr] = c;
+			ptr = (ptr+1) % sizeof rdbr_buffer;
+			old_ucsr = OR(avr_IO[UCSR0A], 0x80);
+			DECR(rdbr_num);
+		} else if(rdbr_num == sizeof rdbr_buffer) {
+			break;
+		} else
+			old_ucsr = OR(avr_IO[UCSR0A], 0x80);
+#ifndef DELAY_IO
+		if(!(old_ucsr & 0x80) && avr_IO[UCSR0B] & 0x80)
+			INT_reason = UDR0, avr_INT = 1;
+#else
+		if(avr_IO[UCSR0B] & 0x80)
+			INT_reason = UDR0, avr_INT = 1;
+#endif
+#ifdef BAUD
+		usleep(10000000/BAUD);
+#endif
+		while(rdbr_num == 0)
+			usleep(THREAD_IO);
+	}
+	return NULL;
+}
 #endif
 
 void avr_io_in(int port)
 {
 	switch(port) {
+#ifdef THREAD_IO
+		static int cur = 0;
+	case UDR0:
+		avr_IO[port] = rdbr_buffer[cur];
+		cur = (cur+1) % sizeof rdbr_buffer;
+		AND(avr_IO[UCSR0A], ~0x80);
+		if(INCR(rdbr_num) < sizeof rdbr_buffer) {
+#  ifndef DELAY_IO
+			OR(avr_IO[UCSR0A], 0x80);
+			if(avr_IO[UCSR0B] & 0x80)
+				INT_reason = UDR0, avr_INT = 1;
+#  endif
+		} else {
+			/* fprintf(stderr, "warning: flow control used\n"); */
+		}
+#else
 		int c;
 	case UDR0:
 		avr_IO[port] = getchar();
@@ -238,6 +290,7 @@ void avr_io_in(int port)
 			if(avr_IO[UCSR0B] & 0x80)
 				INT_reason = UDR0, avr_INT = 1;
 		}
+#endif
 		break;
 	case TCNT0: {
 		static unsigned long long timer;
@@ -376,7 +429,6 @@ int main(int argc, char **argv)
 	signal(SIGINT, ctrlC_handler);
 	if(isatty(STDOUT_FILENO)) setbuf(stdout, NULL);
 
-	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_NONBLOCK);
 	if(isatty(STDIN_FILENO)) {
 		struct termios ctrl;
 		tcgetattr(STDIN_FILENO, &ctrl);
@@ -391,6 +443,9 @@ int main(int argc, char **argv)
 	pthread_create(&wdt_thread, NULL, watchdog, NULL);
 #ifdef THREAD_IO
 	pthread_create(&tty_thread, NULL, fake_console, NULL);
+	pthread_create(&rbr_thread, NULL, fake_receiver, NULL);
+#else
+	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_NONBLOCK);
 #endif
 	do {
 		switch( avr_run() ) {
