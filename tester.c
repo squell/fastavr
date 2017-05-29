@@ -233,10 +233,11 @@ void avr_io_in(int port)
 		avr_IO[port] = getchar();
 		AND(avr_IO[UCSR0A], ~0x80);
 	case UCSR0A:
-		if((avr_IO[UCSR0A] & 0x80) == 0 && (c=getchar()) != EOF)
+		if((avr_IO[UCSR0A] & 0x80) == 0 && (c=getchar()) != EOF) {
 			OR(avr_IO[UCSR0A], 0x80), ungetc(c, stdin);
-		if(avr_IO[UCSR0B] & avr_IO[UCSR0A] & 0x80)
-			INT_reason = UDR0, avr_INT = 1;
+			if(avr_IO[UCSR0B] & 0x80)
+				INT_reason = UDR0, avr_INT = 1;
+		}
 		break;
 	case TCNT0: {
 		static unsigned long long timer;
@@ -297,7 +298,7 @@ void avr_io_out(int port)
 		abort();
 	case UCSR0B:
 		avr_io_in(UCSR0A);
-		if(avr_IO[UCSR0A] & avr_IO[port] & 0x20)
+		if(avr_IO[UCSR0A] & avr_IO[port] & 0xa0)
 			INT_reason = UDR0, avr_INT = 1;
 		break;
 
@@ -385,7 +386,7 @@ int main(int argc, char **argv)
 
 	avr_reset();
 	avr_IO[MCUSR] |= 0x1;  /* set PORF */
-	avr_IO[UCSR0A] = 0x60; /* set TXC and UDRE */
+	avr_IO[UCSR0A] = 0x20; /* set UDRE */
 	/* avr_IO[WDTCR] |= WDE; uncomment this to start the watchdog timer by default */
 	pthread_create(&wdt_thread, NULL, watchdog, NULL);
 #ifdef THREAD_IO
