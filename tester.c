@@ -320,12 +320,11 @@ void avr_io_in(int port)
 	}
 }
 
-/* TODO: this should become a function "vetting" the data */
-void avr_io_out(int port)
+void avr_io_out(int port, unsigned char prev)
 {
-	static unsigned int cur = 0;
 	switch(port) {
 #ifdef THREAD_IO
+		static int cur = 0;
 	case UDR0:
 		uart_buffer[cur] = avr_IO[port];
 		cur = (cur+1) % sizeof uart_buffer;
@@ -356,8 +355,8 @@ void avr_io_out(int port)
 		break;
 #endif
 	case UCSR0A:
-		fprintf(stderr, "writing to UCSR0A not supported\n");
-		abort();
+		avr_IO[port] = prev&~0x42 | (avr_IO[port]&0x42 | ~prev&0x40) ^ 0x40;
+		break;
 	case UCSR0B:
 		avr_io_in(UCSR0A);
 		if(avr_IO[UCSR0A] & avr_IO[port] & 0xa0)

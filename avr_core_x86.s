@@ -78,13 +78,13 @@ BIGPC    = FLASHEND > 0xFFFF
 
    the following optional functions, if defined by the user, will be used as follows:
 
-   void avr_in(int port)
-   void avr_out(int port)
+   void avr_io_in(int port)
+   void avr_io_out(int port[, int prev_value])
    			called right before IN/after OUT instructions (or data access to I/O),
 			with the affected port as an argument (default: do nothing);
 			if port = 0x3F, avr_SREG can be accessed/modified
-   void avr_in_bit(int port, int biot)
-   void avr_out_bit(int port, int biot)
+   void avr_io_in_bit(int port, int bit)
+   void avr_io_out_bit(int port, int bit[, int prev_value])
    			as above, but for SBI/CBI and SBIS/SBIC instructions
 			(default: call avr_in and avr_out)
 
@@ -239,15 +239,15 @@ flagcvt:
 .endif
 .endm
 
-.macro iosignal dir, port, bitmask=0xFF
-    push edx
+.macro iosignal dir, port
     push ecx
+    push edx
     lea eax, port
     push eax
     call avr_io_\dir
-    pop ecx
-    pop ecx
     pop edx
+    pop edx
+    pop ecx
 .endm
 
 .macro decode_next_instr service_ints=INTR
@@ -613,16 +613,16 @@ io_in:
 .p2align 3
 io_out1:
     avr_flags ebx      # might modify sreg
-    mov al, [avr_ADDR+edx]
-    mov [avr_IO+ecx+0x20], al
+    mov dl, [avr_ADDR+edx]
+    lock xchg [avr_IO+ecx+0x20], dl
     iosignal out, [ecx+0x20]
     mov al, [avr_SREG]
     load_flags ebx
     resume
 .p2align 3
 io_out:
-    mov al, [avr_ADDR+edx]
-    mov [avr_IO+ecx], al
+    mov dl, byte ptr [avr_ADDR+edx]
+    lock xchg [avr_IO+ecx], dl
     iosignal out, [ecx]
     resume
 
@@ -641,16 +641,20 @@ io_bit:
     btr ecx, 4 # CF = set
     jc 1f
     lock btr [avr_IO+edx], ecx
+    setc al
+    push eax
     push ecx
     push edx
     call avr_io_out_bit
-    add esp, 8
+    add esp, 12
     resume
 1:  lock bts [avr_IO+edx], ecx
+    setc al
+    push eax
     push ecx
     push edx
     call avr_io_out_bit
-    add esp, 8
+    add esp, 12
     resume
 
 io_bit_skip:
@@ -1329,6 +1333,11 @@ avr_io_in_bit:
     jmp avr_io_in
 .p2align 3
 avr_io_out_bit:
+    movzx edx, byte ptr [avr_IO+edx]
+    btr edx, ecx
+    shl eax, cl      # eax will contain the prev bit value
+    or edx, eax
+    mov [esp+8], edx # pass the call through to avr_io_out
     jmp avr_io_out
 .p2align 3
 avr_des_round:
