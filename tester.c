@@ -80,7 +80,6 @@ void *watchdog(void *threadid)
 	unsigned long timer = 0;
 	fprintf(stderr, "%s\n", "starting watchdog");
 	for(;;) {
-		usleep(1024);
 		unsigned char wdtcr = avr_IO[WDTCR];
 		unsigned long cur = avr_last_wdr;
 		unsigned long threshold = 2ul << ((wdtcr&0x20)/4 + (wdtcr&0x7)) % 10;
@@ -105,6 +104,7 @@ void *watchdog(void *threadid)
 			timer = 0;
 			last_wdr = cur;
 		}
+		usleep(1024);
 	}
 	return NULL;
 }
@@ -127,13 +127,14 @@ static unsigned T_OVF_backlog; /* number of overflow events to catch up on */
 
 static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits)
 {
-	tccr = avr_IO[tccr] & 7;
-	if(!tccr) return 0;
-
 	/* the prescaler is shared for all timers */
 	static unsigned long long last_reset;
 	static unsigned long long prev_cycle;
 	static unsigned long long counted_cycle;
+
+	tccr = avr_IO[tccr] & 7;
+	if(!tccr) return 0;
+
 	if(avr_IO[GTCCR]&PSRSYNC) {
 		if(last_reset != counted_cycle)
 			last_reset = counted_cycle += avr_cycle - prev_cycle;
@@ -143,21 +144,23 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 	prev_cycle = avr_cycle;
 
 	/* if prev != NULL, assume we are reading the register before the clock increases */
-	int h = 1 - (tccr >> 2);
-	int w = (2+h)*(tccr-h);
-	unsigned long long scaled_count = counted_cycle - !!prev - (last_reset&(1<<w)-1) >> w;
-	if(!prev) return scaled_count+(avr_IO[GTCCR]&PSRSYNC);
+	{
+		int h = 1 - (tccr >> 2);
+		int w = (2+h)*(tccr-h);
+		unsigned long long scaled_count = counted_cycle - !!prev - (last_reset&(1<<w)-1) >> w;
+		if(!prev) return scaled_count+(avr_IO[GTCCR]&PSRSYNC);
 
-	if(*prev >> bits != scaled_count >> bits) {
-		avr_IO[tifr] |= TOV;
-		if(avr_IO[timsk]&TOV) { /* generate overflow interruptions */
-			T_OVF_backlog = (scaled_count >> bits) - (*prev >> bits);
-			INT_reason = tifr;
-			avr_INT = 1;
+		if(*prev >> bits != scaled_count >> bits) {
+			avr_IO[tifr] |= TOV;
+			if(avr_IO[timsk]&TOV) { /* generate overflow interruptions */
+				T_OVF_backlog = (scaled_count >> bits) - (*prev >> bits);
+				INT_reason = tifr;
+				avr_INT = 1;
+			}
 		}
-	}
 
-	return *prev = scaled_count;
+		return *prev = scaled_count;
+	}
 }
 
  /* we use I/O functions to
@@ -198,7 +201,7 @@ static unsigned char TEMP;
 /* offsets to derive the counters from the free-running prescaler */
 static unsigned long long timer_ofs[2];
 
-//#define THREAD_IO 10
+/* #define THREAD_IO 10 */
 
 #define OR(x,y) __sync_fetch_and_or(&x,y)
 #define AND(x,y) __sync_fetch_and_and(&x,y)
@@ -420,10 +423,10 @@ void avr_io_out(int port, unsigned char prev)
 
 static void ctrlC_handler(int sig)
 {
+	static int count;    /* fallback */
 	INT_reason = I_RESET;
 	avr_SREG = 0x80;     /* not as good as the watchdog force-quit */
 	avr_INT = 1;
-	static int count;    /* fallback */
 	if(avr_INT && count++ >= 16) abort();
 }
 
@@ -433,13 +436,14 @@ int main(int argc, char **argv)
 	if(!argv[1]) {
 		fprintf(stderr, "usage: tester flash.hex [eeprom.hex]]\n");
 		return 2;
+	} else {
+		int n = ihex_read(argv[1], avr_FLASH, 0x40000);
+		if(n < 0)  {
+			fprintf(stderr, "could not read %s\n", argv[1]);
+			return 2;
+		}
+		fprintf(stderr, "%d bytes read\n", n);
 	}
-	int n = ihex_read(argv[1], avr_FLASH, 0x40000);
-	if(n < 0)  {
-		fprintf(stderr, "could not read %s\n", argv[1]);
-		return 2;
-	}
-	fprintf(stderr, "%d bytes read\n", n);
 
 	memset(eeprom, 0xFF, sizeof eeprom);
 	if(argv[2]) {
