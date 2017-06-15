@@ -58,8 +58,7 @@ void avr_debug(unsigned long ip)
 /* usleep is deprecated in POSIX */
 #define usleep(us) { const struct timespec ts = { us/1000000, (us%1000000)*1000 }; nanosleep(&ts, NULL); }
 
-/* a watchdog process; behaves mostly according to the datasheet,
-   except that the timed sequence involving WDCE isn't implemented */
+/* a watchdog process; behaves mostly according to the datasheet. */
 
 pthread_t wdt_thread;
 
@@ -165,7 +164,7 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 
  /* we use I/O functions to
     - fake a UART: accept everything written to UDR0 (0xA6); always report ready on UCSR0A (0xA0)
-    - implement EEPROM data accesses (note: timed sequence not implemented, nor interrupt-driven EEPROM)
+    - implement EEPROM data accesses
     - implement 8-bit counter 0 and 16-bit counter 1; with interrupts, but no OCR/ICP */
 
 #define UCSR0A 0xA0
@@ -343,6 +342,8 @@ void avr_io_in(int port)
 void avr_io_out(int port, unsigned char prev)
 {
 	switch(port) {
+		static unsigned long long last_wdce = -4;
+		static unsigned long long last_eempe = -4;
 #ifdef THREAD_IO
 		static int cur = 0;
 	case UDR0:
@@ -385,18 +386,20 @@ void avr_io_out(int port, unsigned char prev)
 		break;
 
 	case EECR:
-		if((avr_IO[port]&6) == 6) { /* execute a write */
+		if(avr_cycle-last_eempe <= 4 && avr_IO[port]&EEPE) { /* execute a write */
 			avr_cycle += 2;
 			if((avr_IO[port] & EEPM1) == 0)
 				eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]] = 0xFF;
 			if((avr_IO[port] & EEPM0) == 0)
 				eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]] &= avr_IO[EEDR];
 			avr_IO[port] &= ~(EEMPE|EEPE|EERE);
-		} else if(avr_IO[port]&1) { /* execute a read */
+		} else if(avr_IO[port]&EERE) { /* execute a read */
 			avr_cycle += 4;
 			avr_IO[EEDR] = eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]];
 			avr_IO[port] &= ~(EEMPE|EEPE|EERE);
 		}
+		if(avr_IO[port] & EEMPE)
+			last_eempe = avr_cycle;
 		if(avr_IO[port] & EERIE)
 			INT_reason = EECR, avr_INT = 1;
 		break;
@@ -419,6 +422,14 @@ void avr_io_out(int port, unsigned char prev)
 	case GTCCR:
 		copy_timer(NULL, 1, 0,0,0); /* resets the prescaler if demanded */
 		if(!(avr_IO[port]&TSM)) avr_IO[port] = 0;
+		break;
+	case WDTCR:
+		if(avr_cycle-last_wdce > 4 || avr_IO[MCUSR]&WDRF) {
+			avr_IO[port] = prev&0x2F | avr_IO[port]&~0x27;
+		}
+		if(avr_IO[port]&(WDCE|WDE))
+			last_wdce = avr_cycle;
+		avr_IO[port] &= ~(WDCE | avr_IO[port]&WDIF);
 		break;
 	}
 }
