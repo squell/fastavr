@@ -20,7 +20,7 @@ extern unsigned long avr_PC;
 extern unsigned char avr_ADDR[];
 extern unsigned short int avr_FLASH[];
 extern unsigned short int avr_SP;
-extern unsigned char avr_SREG;
+extern unsigned char volatile avr_SREG;
 
 int avr_run();
 int avr_step();
@@ -70,6 +70,10 @@ enum wdtcr_bits {
 	WDIF = 1<<7, WDIE = 1<<6, WDCE = 1<<4, WDE = 1<<3
 };
 
+enum mcusr_bits {
+	WDRF = 1<<3, EXTRF = 1<<1, PORF = 1<<0
+};
+
 void *watchdog(void *threadid)
 {
 	unsigned long last_wdr = 0;
@@ -80,7 +84,7 @@ void *watchdog(void *threadid)
 		unsigned char wdtcr = avr_IO[WDTCR];
 		unsigned long cur = avr_last_wdr;
 		unsigned long threshold = 2ul << ((wdtcr&0x20)/4 + (wdtcr&0x7)) % 10;
-		if(cur == last_wdr && wdtcr&0x48 && ++timer > threshold) {
+		if(cur == last_wdr && wdtcr&(WDIE|WDE) && ++timer > threshold) {
 			timer = 0;
 			if(wdtcr & WDIE) {
 				wdtcr |= WDIF;
@@ -94,8 +98,8 @@ void *watchdog(void *threadid)
 				timer = last_wdr = 0;
 				INT_reason = I_WDRESET;
 				avr_INT = 1;
-				while(avr_INT && !(avr_IO[MCUSR]&0x8)) /* force-quit the emulator */
-					avr_IO[0x3F] = 0x80;
+				while(avr_INT && !(avr_IO[MCUSR]&WDRF)) /* force-quit the emulator */
+					avr_SREG = 0x80;
 			}
 		} else if(cur != last_wdr) {
 			timer = 0;
@@ -114,6 +118,11 @@ void *watchdog(void *threadid)
 
 #define GTCCR  0x23
 
+enum timer_bits {
+	TSM = 1<<7, PSRSYNC = 1<<0, /* GTCCR */
+	TOV = 1<<0                  /* TIMSKn & TIFRn */
+};
+
 static unsigned T_OVF_backlog; /* number of overflow events to catch up on */
 
 static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits)
@@ -125,7 +134,7 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 	static unsigned long long last_reset;
 	static unsigned long long prev_cycle;
 	static unsigned long long counted_cycle;
-	if(avr_IO[GTCCR]&1) {
+	if(avr_IO[GTCCR]&PSRSYNC) {
 		if(last_reset != counted_cycle)
 			last_reset = counted_cycle += avr_cycle - prev_cycle;
 	} else {
@@ -137,11 +146,11 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 	int h = 1 - (tccr >> 2);
 	int w = (2+h)*(tccr-h);
 	unsigned long long scaled_count = counted_cycle - !!prev - (last_reset&(1<<w)-1) >> w;
-	if(!prev) return scaled_count+(avr_IO[GTCCR]&1);
+	if(!prev) return scaled_count+(avr_IO[GTCCR]&PSRSYNC);
 
 	if(*prev >> bits != scaled_count >> bits) {
-		avr_IO[tifr] |= 1;
-		if(avr_IO[timsk]&1) { /* generate interruptions */
+		avr_IO[tifr] |= TOV;
+		if(avr_IO[timsk]&TOV) { /* generate overflow interruptions */
 			T_OVF_backlog = (scaled_count >> bits) - (*prev >> bits);
 			INT_reason = tifr;
 			avr_INT = 1;
@@ -160,6 +169,10 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 #define UCSR0B 0xA1
 #define UDR0   0xA6
 
+enum ucsr_bits {
+	RXC = 1<<7, TXC = 1<<6, UDRE = 1<<5
+};
+
 #define TCNT0  0x26
 #define TCCR0B 0x25
 #define TIMSK0 0x4E
@@ -175,6 +188,10 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 #define EEARL  0x21
 #define EEDR   0x20
 #define EECR   0x1F
+
+enum eecr_bits {
+	EEPM1 = 1<<5, EEPM0 = 1<<4, EERIE = 1<<3, EEMPE = 1<<2, EEPE = 1<<1, EERE = 1<<0
+};
 
 /* the "temp" register to get 16-bit reads/writes */
 static unsigned char TEMP;
@@ -201,13 +218,13 @@ void *fake_console(void *threadid)
 		while(uart_num > 0) {
 			int c = uart_buffer[ptr], old_ucsr;
 			ptr = (ptr+1) % sizeof uart_buffer;
-			old_ucsr = OR(avr_IO[UCSR0A], 0x60);
+			old_ucsr = OR(avr_IO[UCSR0A], TXC|UDRE);
 			DECR(uart_num);
 #ifndef DELAY_IO
-			if((old_ucsr & 0x60) == 0 && avr_IO[UCSR0B] & 0x60)
+			if((old_ucsr & (TXC|UDRE)) == 0 && avr_IO[UCSR0B] & (TXC|UDRE))
 				INT_reason = UDR0, avr_INT = 1;
 #else
-			if(avr_IO[UCSR0B] & 0x60)
+			if(avr_IO[UCSR0B] & (TXC|UDRE))
 				INT_reason = UDR0, avr_INT = 1;
 #endif
 			if(c == 0x04) {
@@ -238,17 +255,17 @@ void *fake_receiver(void *threadid)
 		if(c != EOF) {
 			rdbr_buffer[ptr] = c;
 			ptr = (ptr+1) % sizeof rdbr_buffer;
-			old_ucsr = OR(avr_IO[UCSR0A], 0x80);
+			old_ucsr = OR(avr_IO[UCSR0A], RXC);
 			DECR(rdbr_num);
 		} else if(rdbr_num == sizeof rdbr_buffer) {
 			break;
 		} else
-			old_ucsr = OR(avr_IO[UCSR0A], 0x80);
+			old_ucsr = OR(avr_IO[UCSR0A], RXC);
 #ifndef DELAY_IO
-		if(!(old_ucsr & 0x80) && avr_IO[UCSR0B] & 0x80)
+		if(!(old_ucsr & RXC) && avr_IO[UCSR0B] & RXC)
 			INT_reason = UDR0, avr_INT = 1;
 #else
-		if(avr_IO[UCSR0B] & 0x80)
+		if(avr_IO[UCSR0B] & RXC)
 			INT_reason = UDR0, avr_INT = 1;
 #endif
 #ifdef BAUD
@@ -264,7 +281,7 @@ void *fake_receiver(void *threadid)
 /* signal handler to handle arrival of data */
 void io_input_handler(int sig)
 {
-	if((avr_IO[UCSR0A] & 0x80) == 0) {
+	if((avr_IO[UCSR0A] & RXC) == 0) {
 		INT_reason = UDR0;
 		avr_INT = 1;
 	}
@@ -278,11 +295,11 @@ void avr_io_in(int port)
 	case UDR0:
 		avr_IO[port] = rdbr_buffer[cur];
 		cur = (cur+1) % sizeof rdbr_buffer;
-		AND(avr_IO[UCSR0A], ~0x80);
+		AND(avr_IO[UCSR0A], ~RXC);
 		if(INCR(rdbr_num) < sizeof rdbr_buffer) {
 #  ifndef DELAY_IO
-			OR(avr_IO[UCSR0A], 0x80);
-			if(avr_IO[UCSR0B] & 0x80)
+			OR(avr_IO[UCSR0A], RXC);
+			if(avr_IO[UCSR0B] & RXC)
 				INT_reason = UDR0, avr_INT = 1;
 #  endif
 		} else {
@@ -292,11 +309,11 @@ void avr_io_in(int port)
 		int c;
 	case UDR0:
 		avr_IO[port] = getchar();
-		AND(avr_IO[UCSR0A], ~0x80);
+		AND(avr_IO[UCSR0A], ~RXC);
 	case UCSR0A:
-		if((avr_IO[UCSR0A] & 0x80) == 0 && (c=getchar()) != EOF) {
-			OR(avr_IO[UCSR0A], 0x80), ungetc(c, stdin);
-			if(avr_IO[UCSR0B] & 0x80)
+		if((avr_IO[UCSR0A] & RXC) == 0 && (c=getchar()) != EOF) {
+			OR(avr_IO[UCSR0A], RXC), ungetc(c, stdin);
+			if(avr_IO[UCSR0B] & RXC)
 				INT_reason = UDR0, avr_INT = 1;
 		}
 #endif
@@ -328,11 +345,11 @@ void avr_io_out(int port, unsigned char prev)
 	case UDR0:
 		uart_buffer[cur] = avr_IO[port];
 		cur = (cur+1) % sizeof uart_buffer;
-		AND(avr_IO[UCSR0A], ~0x60);
+		AND(avr_IO[UCSR0A], ~(TXC|UDRE));
 		if(INCR(uart_num) < sizeof uart_buffer) {
 #  ifndef DELAY_IO
-			OR(avr_IO[UCSR0A], 0x60);
-			if(avr_IO[UCSR0B] & 0x60)
+			OR(avr_IO[UCSR0A], TXC|UDRE);
+			if(avr_IO[UCSR0B] & (TXC|UDRE))
 				INT_reason = UDR0, avr_INT = 1;
 #  endif
 		} else {
@@ -349,32 +366,33 @@ void avr_io_out(int port, unsigned char prev)
 			exit(0);
 		}
 		putchar(c);
-		OR(avr_IO[UCSR0A], 0x60);
-		if(avr_IO[UCSR0B] & 0x60)
+		OR(avr_IO[UCSR0A], TXC|UDRE);
+		if(avr_IO[UCSR0B] & TXC|UDRE)
 			INT_reason = UDR0, avr_INT = 1;
 		break;
 #endif
 	case UCSR0A:
-		avr_IO[port] = prev&~0x42 | (avr_IO[port]&0x42 | ~prev&0x40) ^ 0x40;
+		/* only allow writing the R/W parts */
+		avr_IO[port] = prev&~0x43 | (avr_IO[port]&0x43 | ~prev&TXC) ^ TXC;
 		break;
 	case UCSR0B:
 		avr_io_in(UCSR0A);
-		if(avr_IO[UCSR0A] & avr_IO[port] & 0xa0)
+		if(avr_IO[UCSR0A] & avr_IO[port] & (RXC|UDRE))
 			INT_reason = UDR0, avr_INT = 1;
 		break;
 
 	case EECR:
 		if((avr_IO[port]&6) == 6) { /* execute a write */
 			avr_cycle += 2;
-			if((avr_IO[port] & 0x20) == 0) /* check EEPM1 */
+			if((avr_IO[port] & EEPM1) == 0)
 				eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]] = 0xFF;
-			if((avr_IO[port] & 0x10) == 0) /* check EEPM0 */
+			if((avr_IO[port] & EEPM0) == 0)
 				eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]] &= avr_IO[EEDR];
-			avr_IO[port] &= ~7;
+			avr_IO[port] &= ~(EEMPE|EEPE|EERE);
 		} else if(avr_IO[port]&1) { /* execute a read */
 			avr_cycle += 4;
 			avr_IO[EEDR] = eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]];
-			avr_IO[port] &= ~7;
+			avr_IO[port] &= ~(EEMPE|EEPE|EERE);
 		}
 		break;
 
@@ -395,7 +413,7 @@ void avr_io_out(int port, unsigned char prev)
 		break;
 	case GTCCR:
 		copy_timer(NULL, 1, 0,0,0); /* resets the prescaler if demanded */
-		if(!(avr_IO[port]&0x80)) avr_IO[port] = 0;
+		if(!(avr_IO[port]&TSM)) avr_IO[port] = 0;
 		break;
 	}
 }
@@ -403,7 +421,7 @@ void avr_io_out(int port, unsigned char prev)
 static void ctrlC_handler(int sig)
 {
 	INT_reason = I_RESET;
-	avr_IO[0x3F] = 0x80; /* not as good as the watchdog force-quit */
+	avr_SREG = 0x80;     /* not as good as the watchdog force-quit */
 	avr_INT = 1;
 	static int count;    /* fallback */
 	if(avr_INT && count++ >= 16) abort();
@@ -445,8 +463,8 @@ int main(int argc, char **argv)
 	}
 
 	avr_reset();
-	avr_IO[MCUSR] |= 0x1;  /* set PORF */
-	avr_IO[UCSR0A] = 0x20; /* set UDRE */
+	avr_IO[MCUSR] |= PORF;
+	avr_IO[UCSR0A] = UDRE;
 	/* avr_IO[WDTCR] |= WDE; uncomment this to start the watchdog timer by default */
 	pthread_create(&wdt_thread, NULL, watchdog, NULL);
 #ifdef THREAD_IO
@@ -470,12 +488,12 @@ int main(int argc, char **argv)
 			case I_WDRESET:
 				fprintf(stderr, "%s\n", "watchdog reset");
 				avr_reset();
-				avr_IO[MCUSR] |= 0x8; /* set WDRF */
+				avr_IO[MCUSR] |= WDRF;
 				reset;
 			case I_RESET:
 				fprintf(stderr, "%s\n", "external reset");
 				avr_reset();
-				avr_IO[MCUSR] |= 0x2; /* set EXTRF */
+				avr_IO[MCUSR] |= EXTRF;
 				reset;
 			case TIFR0:
 				avr_IO[TIFR0] &= ~1;
@@ -489,18 +507,18 @@ int main(int argc, char **argv)
 				continue;
 			case UDR0:
 				avr_io_in(UCSR0A);
-				switch(avr_IO[UCSR0B] & avr_IO[UCSR0A] & 0x60) {
-				case 0x20: /* UDR empty - do not clear flag */
-				case 0x60:
+				switch(avr_IO[UCSR0B] & avr_IO[UCSR0A] & (TXC|UDRE)) {
+				case UDRE: /* UDR empty - do not clear flag */
+				case TXC|UDRE:
 					avr_INT = 1; /* always see if UDR is resolved */
 					avr_PC = 0x34;
 					continue;
-				case 0x40: /* TX complete - clear flag, set UDRE */
+				case TXC:  /* TX complete - clear flag, set UDRE */
 					avr_PC = 0x36;
-					AND(avr_IO[UCSR0A], ~0x40);
+					AND(avr_IO[UCSR0A], ~TXC);
 					continue;
 				default:
-					if(avr_IO[UCSR0B] & avr_IO[UCSR0A] & 0x80) {
+					if(avr_IO[UCSR0B] & avr_IO[UCSR0A] & RXC) {
 						avr_INT = 1; /* always check if RXC is resolved */
 						avr_PC = 0x32;
 					} else {
