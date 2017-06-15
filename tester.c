@@ -147,7 +147,7 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 		int h = 1 - (tccr >> 2);
 		int w = (2+h)*(tccr-h);
 		unsigned long long scaled_count = counted_cycle - !!prev - (last_reset&(1<<w)-1) >> w;
-		if(!prev) return scaled_count+(avr_IO[GTCCR]&PSRSYNC);
+		if(!prev) return scaled_count;
 
 		if(*prev >> bits != scaled_count >> bits) {
 			avr_IO[tifr] |= TOV;
@@ -408,20 +408,27 @@ void avr_io_out(int port, unsigned char prev)
 	case TIFR1:
 		avr_IO[port] = 0; /* any write clears the flag */
 		break;
+	case TCCR0B:
 	case TCNT0:
 		timer_ofs[0] = copy_timer(NULL, TCCR0B, 0,0,0);
-		timer_ofs[0] -= (timer_ofs[0] & ~0xFF | avr_IO[port]);
+		timer_ofs[0] -= (timer_ofs[0] & ~0xFF | avr_IO[TCNT0]);
 		break;
+	case TCCR1B: /* recalculate offsets on timer start/stop */
+		timer_ofs[1] = copy_timer(NULL, TCCR1B, 0,0,0);
+		timer_ofs[1] -= (timer_ofs[1] & ~0xFFFF | avr_IO[TCNT1H]<<8 | avr_IO[TCNT1L]);
 	case TCNT1L:
 		timer_ofs[1] = copy_timer(NULL, TCCR1B, 0,0,0);
-		timer_ofs[1] -= (timer_ofs[1] & ~0xFFFF | TEMP<<8 | avr_IO[port]);
+		timer_ofs[1] -= (timer_ofs[1] & ~0xFFFF | TEMP<<8 | avr_IO[TCNT1L]);
 		break;
 	case TCNT1H:
-		TEMP = avr_IO[port];
+		TEMP = avr_IO[TCNT1H];
 		break;
 	case GTCCR:
-		copy_timer(NULL, 1, 0,0,0); /* resets the prescaler if demanded */
-		if(!(avr_IO[port]&TSM)) avr_IO[port] = 0;
+		if(!(avr_IO[port]&PSRSYNC)) avr_IO[port] = 0; /* TSM=1/PSRSYNC=0 ?? */
+		avr_IO[port] |= prev&PSRSYNC;
+		copy_timer(NULL, GTCCR, 0,0,0); /* resets the prescaler if demanded */
+		if(!(avr_IO[port]&TSM))
+			avr_IO[port] = 0;
 		break;
 	case WDTCR:
 		if(avr_cycle-last_wdce > 4 || avr_IO[MCUSR]&WDRF) {
