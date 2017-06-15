@@ -397,6 +397,8 @@ void avr_io_out(int port, unsigned char prev)
 			avr_IO[EEDR] = eeprom[avr_IO[EEARH]<<8 | avr_IO[EEARL]];
 			avr_IO[port] &= ~(EEMPE|EEPE|EERE);
 		}
+		if(avr_IO[port] & EERIE)
+			INT_reason = EECR, avr_INT = 1;
 		break;
 
 	case TIFR0:
@@ -509,6 +511,11 @@ int main(int argc, char **argv)
 				avr_PC = 0x28;
 				if(T_OVF_backlog--) avr_INT = 1;
 				continue;
+			case EECR:
+				if(!(avr_IO[EECR] & EERIE)) goto ignore;
+				avr_INT = 1; /* always see if EERIE is resolved */
+				avr_PC = 0x3C;
+				continue;
 			case UDR0:
 				avr_io_in(UCSR0A);
 				switch(avr_IO[UCSR0B] & avr_IO[UCSR0A] & (TXC|UDRE)) {
@@ -525,15 +532,17 @@ int main(int argc, char **argv)
 					if(avr_IO[UCSR0B] & avr_IO[UCSR0A] & RXC) {
 						avr_INT = 1; /* always check if RXC is resolved */
 						avr_PC = 0x32;
-					} else {
-						/* everything ok, perform an IRET (kind of kludgy) */
-						avr_SREG |= 0x80;
-						avr_PC  = avr_ADDR[++avr_SP] << 16;
-						avr_PC |= avr_ADDR[++avr_SP] << 8;
-						avr_PC |= avr_ADDR[++avr_SP];
+						continue;
 					}
-					continue;
+					goto ignore;
 				};
+			ignore:
+				/* everything ok, perform an IRET (kind of kludgy) */
+				avr_SREG |= 0x80;
+				avr_PC  = avr_ADDR[++avr_SP] << 16;
+				avr_PC |= avr_ADDR[++avr_SP] << 8;
+				avr_PC |= avr_ADDR[++avr_SP];
+				continue;
 			default:
 				fprintf(stderr, "%s\n", "unknown interrupt");
 			}
