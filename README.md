@@ -45,13 +45,10 @@ Todo/Limitations
 the flags. This should only be noticeable when using SES/SEV/SEO/CLS/CLV/CLO
 or writing SREG via I/O-space
 
-* No self-programming ability (no SPM instruction).
+* SPM and DES instructions are supported as hooks for C functions; see the `des-support` branch for a AVR-compatible emulation of the DES instruction.
 
-* No support for Reduced Core AVR; the DES instruction is supported
-  as a hook for a C function (demonstrated in the `des-support` branch)
+* No support for Reduced Core AVR; cycle count not correct for XMEGA microcontrollers.
   
-* Cycle count is not correct for XMEGA microcontrollers.
-
 * Not all illegal opcodes will result in an error. Neither will out-of-bounds SRAM accesses.
 
 * The core has not yet been ported to x86-64.

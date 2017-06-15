@@ -88,6 +88,9 @@ BIGPC    = FLASHEND > 0xFFFF
    			as above, but for SBI/CBI and SBIS/SBIC instructions
 			(default: call avr_in and avr_out)
 
+   void avr_self_program(int address[, word value])
+			called when a SPM instruction is executed (value is simply R1:R0)
+
    void avr_des_round(byte* data, byte* key, int round, int decrypt)
    			called when a DES instruction is executed (default: abort)
 */
@@ -109,6 +112,7 @@ BIGPC    = FLASHEND > 0xFFFF
 .weak avr_io_in_bit
 .weak avr_io_out
 .weak avr_io_out_bit
+.weak avr_self_program
 .weak avr_des_round
 
 .text
@@ -1060,7 +1064,7 @@ f_ret:
 # 1001  -> break
 # 1010  -> wdr
 # 11s0  -> lpm/spm implied r0 freak instruction
-# 11s1  -> elpm/espm implied r0 freak instruction
+# 11s1  -> elpm/spm z+ implied r0 freak instruction
     btr edx, 3
     jc f_misc
 
@@ -1100,13 +1104,30 @@ f_misc:
     resume
 
 .p2align 3
-# TODO: only LPM implemented; add SPM
 f_lpm_spm_r0:
     add dword ptr [avr_cycle], 1
     adc dword ptr [avr_cycle+4], 0
     lea ecx, [edx*2-4] # 100->100, 101->110, so (e)lpm->(e)lpm r0
     xor edx, edx
-    jmp e_lpm
+    cmp ecx, 0x8
+    jb e_lpm
+    # zf clear -> post-incremented spm
+
+    movzx esi, word ptr [Z]
+    lea ecx, [esi+1]
+    cmovz ecx, esi
+    mov [Z], cx
+.if BIGPC
+    mov al, [RAMPZ]
+    shl eax, 16
+    or esi, eax
+.endif
+    movzx eax, word ptr [avr_ADDR]
+    push eax
+    push esi
+    call avr_self_program
+    add esp, 8
+    resume
 
 .p2align 3
 f_com:
@@ -1340,6 +1361,7 @@ avr_io_out_bit:
     mov [esp+8], edx # pass the call through to avr_io_out
     jmp avr_io_out
 .p2align 3
+avr_self_program:
 avr_des_round:
     jmp abort
 
