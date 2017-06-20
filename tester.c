@@ -60,8 +60,6 @@ void avr_debug(unsigned long ip)
 
 /* a watchdog process; behaves mostly according to the datasheet. */
 
-pthread_t wdt_thread;
-
 #define MCUSR 0x34
 #define WDTCR 0x21
 
@@ -73,7 +71,9 @@ enum mcusr_bits {
 	WDRF = 1<<3, EXTRF = 1<<1, PORF = 1<<0
 };
 
-void *watchdog(void *threadid)
+static pthread_t wdt_thread;
+
+static void *watchdog(void *threadid)
 {
 	unsigned long last_wdr = 0;
 	unsigned long timer = 0;
@@ -208,12 +208,12 @@ static unsigned long long timer_ofs[2];
 #define DECR(x) __sync_fetch_and_sub(&x,1)
 
 #ifdef THREAD_IO
-pthread_t tty_thread;
+static pthread_t tty_thread;
 
-volatile unsigned char uart_buffer[256];
-volatile unsigned int uart_num;
+static volatile unsigned char uart_buffer[256];
+static volatile unsigned int uart_num;
 
-void *fake_console(void *threadid)
+static void *fake_console(void *threadid)
 {
 	int ptr = 0;
 	while(1) {
@@ -243,12 +243,12 @@ void *fake_console(void *threadid)
 	}
 }
 
-pthread_t rbr_thread;
+static pthread_t rbr_thread;
 
-volatile unsigned char rdbr_buffer[256];
-volatile unsigned int rdbr_num = sizeof rdbr_buffer;
+static volatile unsigned char rdbr_buffer[256];
+static volatile unsigned int rdbr_num = sizeof rdbr_buffer;
 
-void *fake_receiver(void *threadid)
+static void *fake_receiver(void *threadid)
 {
 	int ptr = 0;
 	sched_yield();
@@ -281,7 +281,7 @@ void *fake_receiver(void *threadid)
 #endif
 
 /* signal handler to handle arrival of data */
-void io_input_handler(int sig)
+static void io_input_handler(int sig)
 {
 	if((avr_IO[UCSR0A] & RXC) == 0) {
 		INT_reason = UDR0;
