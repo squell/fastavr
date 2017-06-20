@@ -4,11 +4,15 @@
 #include <sched.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/time.h>
 #include <fcntl.h>
 #include <termios.h>
 #include <string.h>
 #include <signal.h>
 #include "ihexread.h"
+
+/* #define THREAD_IO 10 */
+/* #define THREAD_TIMER 1000 */
 
 extern volatile unsigned long long avr_cycle;
 extern volatile unsigned long avr_last_wdr;
@@ -56,7 +60,13 @@ void avr_debug(unsigned long ip)
 }
 
 /* usleep is deprecated in POSIX */
-#define usleep(us) { const struct timespec ts = { us/1000000, (us%1000000)*1000 }; nanosleep(&ts, NULL); }
+#define usleep(us) \
+	{ struct timespec ts = { us/1000000, (us%1000000)*1000 }; \
+	  while(nanosleep(&ts, &ts)); }
+#define ualarm(us,iv) \
+	{ const struct timeval tv  = { us/1000000, us%1000000 }; \
+	  const struct itimerval itv = { tv, tv }; \
+	  setitimer(ITIMER_REAL, &itv, NULL); }
 
 /* a watchdog process; behaves mostly according to the datasheet. */
 
@@ -122,7 +132,7 @@ enum timer_bits {
 	TOV = 1<<0                  /* TIMSKn & TIFRn */
 };
 
-static unsigned T_OVF_backlog; /* number of overflow events to catch up on */
+static volatile unsigned T_OVF_backlog; /* number of overflow events to catch up on */
 
 static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits)
 {
@@ -152,7 +162,7 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 		if(*prev >> bits != scaled_count >> bits) {
 			avr_IO[tifr] |= TOV;
 			if(avr_IO[timsk]&TOV) { /* generate overflow interruptions */
-				T_OVF_backlog = (scaled_count >> bits) - (*prev >> bits);
+				T_OVF_backlog += (scaled_count >> bits) - (*prev >> bits);
 				INT_reason = tifr;
 				avr_INT = 1;
 			}
@@ -198,9 +208,14 @@ enum eecr_bits {
 /* the "temp" register to get 16-bit reads/writes */
 static unsigned char TEMP;
 /* offsets to derive the counters from the free-running prescaler */
-static unsigned long long timer_ofs[2];
+static unsigned long long timer[2], timer_ofs[2];
 
-/* #define THREAD_IO 10 */
+/* a routine for asynchronously polling the timer */
+static void timer_poll_handler(int sig)
+{
+	copy_timer(&timer[0], TCCR0B, TIFR0, TIMSK0, 8);
+	copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16);
+}
 
 #define OR(x,y) __sync_fetch_and_or(&x,y)
 #define AND(x,y) __sync_fetch_and_and(&x,y)
@@ -320,19 +335,15 @@ void avr_io_in(int port)
 		}
 #endif
 		break;
-	case TCNT0: {
-		static unsigned long long timer;
-		copy_timer(&timer, TCCR0B, TIFR0, TIMSK0, 8);
-		avr_IO[port] = timer - timer_ofs[0];
+	case TCNT0:
+		copy_timer(&timer[0], TCCR0B, TIFR0, TIMSK0, 8);
+		avr_IO[port] = timer[0] - timer_ofs[0];
 		break;
-	}
-	case TCNT1L: {
-		static unsigned long long timer;
-		copy_timer(&timer, TCCR1B, TIFR1, TIMSK1, 16);
-		avr_IO[port] = timer - timer_ofs[1];
-		TEMP         = timer - timer_ofs[1] >> 8;
+	case TCNT1L:
+		copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16);
+		avr_IO[port] = timer[1] - timer_ofs[1];
+		TEMP         = timer[1] - timer_ofs[1] >> 8;
 		break;
-	}
 	case TCNT1H:
 		avr_IO[port] = TEMP;
 		break;
@@ -499,6 +510,17 @@ int main(int argc, char **argv)
 	fcntl(STDIN_FILENO, F_SETOWN, getpid());
 	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_ASYNC | O_NONBLOCK);
 #endif
+#ifdef THREAD_TIMER
+	{
+		/* block the main CPU thread from getting bogged down with the timer */
+		sigset_t set;
+		sigemptyset(&set);
+		sigaddset(&set, SIGALRM);
+		pthread_sigmask(SIG_BLOCK, &set, NULL);
+	}
+	signal(SIGALRM, timer_poll_handler);
+	ualarm(THREAD_TIMER,0);
+#endif
 	do {
 		switch( avr_run() ) {
 		case 0:
@@ -522,12 +544,12 @@ int main(int argc, char **argv)
 			case TIFR0:
 				avr_IO[TIFR0] &= ~1;
 				avr_PC = 0x2E;
-				if(T_OVF_backlog--) avr_INT = 1;
+				if(--T_OVF_backlog) avr_INT = 1;
 				continue;
 			case TIFR1:
 				avr_IO[TIFR1] &= ~1;
 				avr_PC = 0x28;
-				if(T_OVF_backlog--) avr_INT = 1;
+				if(--T_OVF_backlog) avr_INT = 1;
 				continue;
 			case EECR:
 				if(!(avr_IO[EECR] & EERIE)) goto ignore;
