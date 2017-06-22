@@ -61,8 +61,12 @@ void avr_debug(unsigned long ip)
 
 /* usleep is deprecated in POSIX */
 #define usleep(us) \
-	{ struct timespec ts = { us/1000000, (us%1000000)*1000 }; \
-	  while(nanosleep(&ts, &ts)); }
+	{ struct timespec ts; \
+	  clock_gettime(CLOCK_MONOTONIC, &ts); \
+	  ts.tv_nsec += us*1000; \
+	  ts.tv_nsec %= 1000000; \
+	  ts.tv_sec += (ts.tv_nsec + us*1000)/1000000; \
+	  while(clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL)); }
 #define ualarm(us,iv) \
 	{ const struct timeval tv  = { us/1000000, us%1000000 }; \
 	  const struct itimerval itv = { tv, tv }; \
