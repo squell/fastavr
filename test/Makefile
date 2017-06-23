@@ -1,10 +1,10 @@
-.SUFFIXES: .hex .s .o .aout
+.SUFFIXES: .hex .s .o .elf
 
 .s.o:
 	avr-as --mmcu=atmega2560 $< -o$@
 
-.o.aout:
+.o.elf:
 	avr-ld -mavr6 $< -o$@
 
-.aout.hex:
+.elf.hex:
 	avr-objcopy -O ihex $< $@

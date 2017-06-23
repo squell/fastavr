@@ -137,7 +137,7 @@ enum timer_bits {
 
 static volatile unsigned T_OVF_backlog; /* number of overflow events to catch up on */
 
-static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits)
+static void copy_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits, int offset)
 {
 	/* the prescaler is shared for all timers */
 	static unsigned long long last_reset;
@@ -145,7 +145,7 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 	static unsigned long long counted_cycle;
 
 	tccr = avr_IO[tccr] & 7;
-	if(!tccr) return 0;
+	if(!tccr) return;
 
 	if(avr_IO[GTCCR]&PSRSYNC) {
 		if(last_reset != counted_cycle)
@@ -155,13 +155,12 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 	}
 	prev_cycle = avr_cycle;
 
-	/* if prev != NULL, assume we are reading the register before the clock increases */
-	{
+	if(prev) {
+		/* assume we are reading the register before the clock increases */
 		int h = 1 - (tccr >> 2);
 		int w = (2+h)*(tccr-h);
-		unsigned long long scaled_count = counted_cycle - !!prev - (last_reset&(1<<w)-1) >> w;
-		if(!prev) return scaled_count;
-
+		unsigned long long scaled_count = counted_cycle-1 - (last_reset&(1<<w)-1) >> w;
+		scaled_count += offset;
 		if(*prev >> bits != scaled_count >> bits) {
 			avr_IO[tifr] |= TOV;
 			if(avr_IO[timsk]&TOV) { /* generate overflow interruptions */
@@ -170,7 +169,7 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 			}
 		}
 
-		return *prev = scaled_count;
+		*prev = scaled_count;
 	}
 }
 
@@ -218,13 +217,14 @@ enum eecr_bits {
 /* the "temp" register to get 16-bit reads/writes */
 static unsigned char TEMP;
 /* offsets to derive the counters from the free-running prescaler */
-static unsigned long long timer[2], timer_ofs[2];
+static unsigned long long timer[2];
+static int timer_ofs[2];
 
 /* a routine for asynchronously polling the timer */
 static void timer_poll_handler(int sig)
 {
-	copy_timer(&timer[0], TCCR0B, TIFR0, TIMSK0, 8);
-	copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16);
+	copy_timer(&timer[0], TCCR0B, TIFR0, TIMSK0, 8,  timer_ofs[0]);
+	copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16, timer_ofs[1]);
 }
 
 #define OR(x,y) __sync_fetch_and_or(&x,y)
@@ -345,13 +345,13 @@ void avr_io_in(int port)
 #endif
 		break;
 	case TCNT0:
-		copy_timer(&timer[0], TCCR0B, TIFR0, TIMSK0, 8);
-		avr_IO[port] = timer[0] - timer_ofs[0];
+		copy_timer(&timer[0], TCCR0B, TIFR0, TIMSK0, 8,  timer_ofs[0]);
+		avr_IO[port] = timer[0];
 		break;
 	case TCNT1L:
-		copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16);
-		avr_IO[port] = timer[1] - timer_ofs[1];
-		TEMP         = timer[1] - timer_ofs[1] >> 8;
+		copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16, timer_ofs[1]);
+		avr_IO[port] = timer[1];
+		TEMP         = timer[1] >> 8;
 		break;
 	case TCNT1H:
 		avr_IO[port] = TEMP;
@@ -430,15 +430,20 @@ void avr_io_out(int port, unsigned char prev)
 		break;
 	case TCCR0B:
 	case TCNT0:
-		timer_ofs[0] = copy_timer(NULL, TCCR0B, 0,0,0);
-		timer_ofs[0] -= (timer_ofs[0] & ~0xFF | avr_IO[TCNT0]);
+		avr_cycle++;
+		copy_timer(&timer[0], TCCR0B, TIFR0, TIMSK0, 8, timer_ofs[0]);
+		avr_cycle--;
+		timer_ofs[0] = avr_IO[TCNT0] - (timer[0]-timer_ofs[0]&0xFF);
 		break;
-	case TCCR1B: /* recalculate offsets on timer start/stop */
-		timer_ofs[1] = copy_timer(NULL, TCCR1B, 0,0,0);
-		timer_ofs[1] -= (timer_ofs[1] & ~0xFFFF | avr_IO[TCNT1H]<<8 | avr_IO[TCNT1L]);
+	case TCCR1B: /* duplicate code to avoid re-use of TEMP */
+		avr_cycle++;
+		copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16, timer_ofs[1]);
+		avr_cycle--;
+		timer_ofs[1] = (avr_IO[TCNT1L]+avr_IO[TCNT1H]<<8) - (timer[1]-timer_ofs[1]&0xFFFF);
+		break;
 	case TCNT1L:
-		timer_ofs[1] = copy_timer(NULL, TCCR1B, 0,0,0);
-		timer_ofs[1] -= (timer_ofs[1] & ~0xFFFF | TEMP<<8 | avr_IO[TCNT1L]);
+		copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16, timer_ofs[1]);
+		timer_ofs[1] = (avr_IO[TCNT1L]+TEMP<<8) - (timer[1]&0xFFFF);
 		break;
 	case TCNT1H:
 		TEMP = avr_IO[TCNT1H];
@@ -446,7 +451,7 @@ void avr_io_out(int port, unsigned char prev)
 	case GTCCR:
 		if(!(avr_IO[port]&PSRSYNC)) avr_IO[port] = 0; /* TSM=1/PSRSYNC=0 ?? */
 		avr_IO[port] |= prev&PSRSYNC;
-		copy_timer(NULL, GTCCR, 0,0,0); /* resets the prescaler if demanded */
+		copy_timer(NULL, GTCCR, 0,0,0, 0); /* resets the prescaler if demanded */
 		if(!(avr_IO[port]&TSM))
 			avr_IO[port] = 0;
 		break;
