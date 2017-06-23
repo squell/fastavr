@@ -34,7 +34,7 @@ static unsigned char eeprom[0x10000];
 static size_t eeprom_nonvolatile;
 static const char *eeprom_file;
 
-static volatile enum { I_WDINT, I_WDRESET, I_RESET } INT_reason;
+static volatile enum { INTR, WDRESET, XRESET } INT_reason;
 
 #define reset break
 
@@ -104,11 +104,10 @@ static void *watchdog(void *threadid)
 					wdtcr &=~WDIE;
 				avr_IO[WDTCR] = wdtcr;
 				timer = 0;
-				INT_reason = I_WDINT;
 				avr_INT = 1;
 			} else if(wdtcr & WDE) {
 				timer = last_wdr = 0;
-				INT_reason = I_WDRESET;
+				INT_reason = WDRESET;
 				avr_INT = 1;
 				while(avr_INT && !(avr_IO[MCUSR]&WDRF)) /* force-quit the emulator */
 					avr_SREG = 0x80;
@@ -167,7 +166,6 @@ static unsigned long long copy_timer(unsigned long long *prev, int tccr, int tif
 			avr_IO[tifr] |= TOV;
 			if(avr_IO[timsk]&TOV) { /* generate overflow interruptions */
 				T_OVF_backlog += (scaled_count >> bits) - (*prev >> bits);
-				INT_reason = tifr;
 				avr_INT = 1;
 			}
 		}
@@ -204,6 +202,14 @@ enum ucsr_bits {
 #define EEARL  0x21
 #define EEDR   0x20
 #define EECR   0x1F
+
+#define vec_WDIF 0x18
+#define vec_TOV0 0x2E
+#define vec_TOV1 0x28
+#define vec_EERI 0x3C
+#define vec_UDRE 0x34
+#define vec_TXC  0x36
+#define vec_RXC  0x32
 
 enum eecr_bits {
 	EEPM1 = 1<<5, EEPM0 = 1<<4, EERIE = 1<<3, EEMPE = 1<<2, EEPE = 1<<1, EERE = 1<<0
@@ -243,10 +249,10 @@ static void *fake_console(void *threadid)
 			DECR(uart_num);
 #ifndef DELAY_IO
 			if((old_ucsr & (TXC|UDRE)) == 0 && avr_IO[UCSR0B] & (TXC|UDRE))
-				INT_reason = UDR0, avr_INT = 1;
+				avr_INT = 1;
 #else
 			if(avr_IO[UCSR0B] & (TXC|UDRE))
-				INT_reason = UDR0, avr_INT = 1;
+				avr_INT = 1;
 #endif
 			if(c == 0x04) {
 				fprintf(stderr, "end of transmission\n");
@@ -284,10 +290,10 @@ static void *fake_receiver(void *threadid)
 			old_ucsr = OR(avr_IO[UCSR0A], RXC);
 #ifndef DELAY_IO
 		if(!(old_ucsr & RXC) && avr_IO[UCSR0B] & RXC)
-			INT_reason = UDR0, avr_INT = 1;
+			avr_INT = 1;
 #else
 		if(avr_IO[UCSR0B] & RXC)
-			INT_reason = UDR0, avr_INT = 1;
+			avr_INT = 1;
 #endif
 #ifdef BAUD
 		usleep(10000000/BAUD);
@@ -303,7 +309,6 @@ static void *fake_receiver(void *threadid)
 static void io_input_handler(int sig)
 {
 	if((avr_IO[UCSR0A] & RXC) == 0) {
-		INT_reason = UDR0;
 		avr_INT = 1;
 	}
 }
@@ -321,7 +326,7 @@ void avr_io_in(int port)
 #  ifndef DELAY_IO
 			OR(avr_IO[UCSR0A], RXC);
 			if(avr_IO[UCSR0B] & RXC)
-				INT_reason = UDR0, avr_INT = 1;
+				avr_INT = 1;
 #  endif
 		} else {
 			/* fprintf(stderr, "warning: flow control used\n"); */
@@ -335,7 +340,7 @@ void avr_io_in(int port)
 		if((avr_IO[UCSR0A] & RXC) == 0 && (c=getchar()) != EOF) {
 			OR(avr_IO[UCSR0A], RXC), ungetc(c, stdin);
 			if(avr_IO[UCSR0B] & RXC)
-				INT_reason = UDR0, avr_INT = 1;
+				avr_INT = 1;
 		}
 #endif
 		break;
@@ -369,7 +374,7 @@ void avr_io_out(int port, unsigned char prev)
 #  ifndef DELAY_IO
 			OR(avr_IO[UCSR0A], TXC|UDRE);
 			if(avr_IO[UCSR0B] & (TXC|UDRE))
-				INT_reason = UDR0, avr_INT = 1;
+				avr_INT = 1;
 #  endif
 		} else {
 			/* fprintf(stderr, "warning: flow control used\n"); */
@@ -387,7 +392,7 @@ void avr_io_out(int port, unsigned char prev)
 		putchar(c);
 		OR(avr_IO[UCSR0A], TXC|UDRE);
 		if(avr_IO[UCSR0B] & TXC|UDRE)
-			INT_reason = UDR0, avr_INT = 1;
+			avr_INT = 1;
 		break;
 #endif
 	case UCSR0A:
@@ -397,7 +402,7 @@ void avr_io_out(int port, unsigned char prev)
 	case UCSR0B:
 		avr_io_in(UCSR0A);
 		if(avr_IO[UCSR0A] & avr_IO[port] & (RXC|UDRE))
-			INT_reason = UDR0, avr_INT = 1;
+			avr_INT = 1;
 		break;
 
 	case EECR:
@@ -416,7 +421,7 @@ void avr_io_out(int port, unsigned char prev)
 		if(avr_IO[port] & EEMPE)
 			last_eempe = avr_cycle;
 		if(avr_IO[port] & EERIE)
-			INT_reason = EECR, avr_INT = 1;
+			avr_INT = 1;
 		break;
 
 	case TIFR0:
@@ -459,7 +464,7 @@ void avr_io_out(int port, unsigned char prev)
 static void ctrlC_handler(int sig)
 {
 	static int count;    /* fallback */
-	INT_reason = I_RESET;
+	INT_reason = XRESET;
 	avr_SREG = 0x80;     /* not as good as the watchdog force-quit */
 	avr_INT = 1;
 	if(avr_INT && count++ >= 16) abort();
@@ -528,67 +533,61 @@ int main(int argc, char **argv)
 	do {
 		switch( avr_run() ) {
 		case 0:
-			switch(INT_reason) {
-			case I_WDINT:
-				fprintf(stderr, "%s\n", "watchdog interrupt");
-				/* avr_PC = 0xC; on ATtiny */
-				avr_PC = 0x18;
-				avr_IO[WDTCR] &=~WDIF;
-				continue;
-			case I_WDRESET:
-				fprintf(stderr, "%s\n", "watchdog reset");
-				avr_reset();
-				avr_IO[MCUSR] |= WDRF;
-				reset;
-			case I_RESET:
+			if(INT_reason == XRESET) {
 				fprintf(stderr, "%s\n", "external reset");
 				avr_reset();
 				avr_IO[MCUSR] |= EXTRF;
 				reset;
-			case TIFR0:
-				avr_IO[TIFR0] &= ~1;
-				avr_PC = 0x2E;
+			} else if(INT_reason == WDRESET) {
+				fprintf(stderr, "%s\n", "watchdog reset");
+				avr_reset();
+				avr_IO[MCUSR] |= WDRF;
+				reset;
+			} else if(avr_IO[WDTCR] & WDIF) {
+				fprintf(stderr, "%s\n", "watchdog interrupt");
+				avr_PC = vec_WDIF;
+				avr_IO[WDTCR] &=~WDIF;
+				continue;
+			} else if(avr_IO[TIFR0] & avr_IO[TIMSK0] & TOV) { // TODO: make more robust, T_OVF_backlog is currently shared...
+				avr_IO[TIFR0] &= ~TOV;
+				avr_PC = vec_TOV0;
 				if(--T_OVF_backlog) avr_INT = 1;
 				continue;
-			case TIFR1:
-				avr_IO[TIFR1] &= ~1;
-				avr_PC = 0x28;
+			} else if(avr_IO[TIFR1] & avr_IO[TIMSK1] & TOV) {
+				avr_IO[TIFR1] &= ~TOV;
+				avr_PC = vec_TOV1;
 				if(--T_OVF_backlog) avr_INT = 1;
 				continue;
-			case EECR:
-				if(!(avr_IO[EECR] & EERIE)) goto ignore;
+			} else if(avr_IO[EECR] & EERIE) {
 				avr_INT = 1; /* always see if EERIE is resolved */
-				avr_PC = 0x3C;
+				avr_PC = vec_EERI;
 				continue;
-			case UDR0:
+			} else { /* must be a serial-related interrupt... */
 				avr_io_in(UCSR0A);
 				switch(avr_IO[UCSR0B] & avr_IO[UCSR0A] & (TXC|UDRE)) {
 				case UDRE: /* UDR empty - do not clear flag */
 				case TXC|UDRE:
 					avr_INT = 1; /* always see if UDR is resolved */
-					avr_PC = 0x34;
+					avr_PC = vec_UDRE;
 					continue;
 				case TXC:  /* TX complete - clear flag, set UDRE */
-					avr_PC = 0x36;
+					avr_PC = vec_TXC;
 					AND(avr_IO[UCSR0A], ~TXC);
 					continue;
 				default:
 					if(avr_IO[UCSR0B] & avr_IO[UCSR0A] & RXC) {
 						avr_INT = 1; /* always check if RXC is resolved */
-						avr_PC = 0x32;
+						avr_PC = vec_RXC;
 						continue;
 					}
 					goto ignore;
 				};
-			ignore:
-				/* everything ok, perform an IRET (kind of kludgy) */
+			ignore: /* everything ok, perform an IRET (kind of kludgy) */
 				avr_SREG |= 0x80;
 				avr_PC  = avr_ADDR[++avr_SP] << 16;
 				avr_PC |= avr_ADDR[++avr_SP] << 8;
 				avr_PC |= avr_ADDR[++avr_SP];
 				continue;
-			default:
-				fprintf(stderr, "%s\n", "unknown interrupt");
 			}
 			break;
 		case 1:
