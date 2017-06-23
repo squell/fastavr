@@ -135,9 +135,7 @@ enum timer_bits {
 	TOV = 1<<0                  /* TIMSKn & TIFRn */
 };
 
-static volatile unsigned T_OVF_backlog; /* number of overflow events to catch up on */
-
-static void copy_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits, int offset)
+static void simulate_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits, int offset, volatile unsigned *overflow_events)
 {
 	/* the prescaler is shared for all timers */
 	static unsigned long long last_reset;
@@ -164,11 +162,10 @@ static void copy_timer(unsigned long long *prev, int tccr, int tifr, int timsk, 
 		if(*prev >> bits != scaled_count >> bits) {
 			avr_IO[tifr] |= TOV;
 			if(avr_IO[timsk]&TOV) { /* generate overflow interruptions */
-				T_OVF_backlog += (scaled_count >> bits) - (*prev >> bits);
+				*overflow_events = (scaled_count >> bits) - (*prev >> bits);
 				avr_INT = 1;
 			}
 		}
-
 		*prev = scaled_count;
 	}
 }
@@ -219,12 +216,23 @@ static unsigned char TEMP;
 /* offsets to derive the counters from the free-running prescaler */
 static unsigned long long timer[2];
 static int timer_ofs[2];
+/* number of overflow events to catch up on */
+static volatile unsigned timer_overflows[2];
+
+#define fetch_timer(n) \
+	simulate_timer(&timer[n], TCCR##n##B, TIFR##n, TIMSK##n, n==1? 16 : 8, timer_ofs[n], &timer_overflows[n])
+
+#define set_timer(n, val) \
+	fetch_timer(n); \
+	timer[n] -= timer_ofs[n]; \
+	timer[n] += timer_ofs[n] = (val) - (timer[n]&(n==1? 0xFFFF: 0xFF));
+
 
 /* a routine for asynchronously polling the timer */
 static void timer_poll_handler(int sig)
 {
-	copy_timer(&timer[0], TCCR0B, TIFR0, TIMSK0, 8,  timer_ofs[0]);
-	copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16, timer_ofs[1]);
+	fetch_timer(0);
+	fetch_timer(1);
 }
 
 #define OR(x,y) __sync_fetch_and_or(&x,y)
@@ -345,11 +353,11 @@ void avr_io_in(int port)
 #endif
 		break;
 	case TCNT0:
-		copy_timer(&timer[0], TCCR0B, TIFR0, TIMSK0, 8,  timer_ofs[0]);
+		fetch_timer(0);
 		avr_IO[port] = timer[0];
 		break;
 	case TCNT1L:
-		copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16, timer_ofs[1]);
+		fetch_timer(1);
 		avr_IO[port] = timer[1];
 		TEMP         = timer[1] >> 8;
 		break;
@@ -428,30 +436,29 @@ void avr_io_out(int port, unsigned char prev)
 	case TIFR1:
 		avr_IO[port] = 0; /* any write clears the flag */
 		break;
-	case TCCR0B:
 	case TCNT0:
 		avr_cycle++;
-		copy_timer(&timer[0], TCCR0B, TIFR0, TIMSK0, 8, timer_ofs[0]);
+		set_timer(0, avr_IO[TCNT0]);
 		avr_cycle--;
-		timer_ofs[0] = avr_IO[TCNT0] - (timer[0]-timer_ofs[0]&0xFF);
-		break;
-	case TCCR1B: /* duplicate code to avoid re-use of TEMP */
-		avr_cycle++;
-		copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16, timer_ofs[1]);
-		avr_cycle--;
-		timer_ofs[1] = (avr_IO[TCNT1L]+avr_IO[TCNT1H]<<8) - (timer[1]-timer_ofs[1]&0xFFFF);
 		break;
 	case TCNT1L:
-		copy_timer(&timer[1], TCCR1B, TIFR1, TIMSK1, 16, timer_ofs[1]);
-		timer_ofs[1] = (avr_IO[TCNT1L]+TEMP<<8) - (timer[1]&0xFFFF);
+		avr_cycle++;
+		set_timer(1, avr_IO[TCNT1L]+TEMP*0x100);
+		avr_cycle--;
 		break;
 	case TCNT1H:
 		TEMP = avr_IO[TCNT1H];
 		break;
+	case TCCR0B:
+		set_timer(0, avr_IO[TCNT0]);
+		break;
+	case TCCR1B: /* duplicate code to avoid re-use of TEMP */
+		set_timer(1, avr_IO[TCNT1L]+avr_IO[TCNT1H]*0x100);
+		break;
 	case GTCCR:
 		if(!(avr_IO[port]&PSRSYNC)) avr_IO[port] = 0; /* TSM=1/PSRSYNC=0 ?? */
 		avr_IO[port] |= prev&PSRSYNC;
-		copy_timer(NULL, GTCCR, 0,0,0, 0); /* resets the prescaler if demanded */
+		simulate_timer(NULL, GTCCR, 0,0,0, 0, NULL); /* resets the prescaler if demanded */
 		if(!(avr_IO[port]&TSM))
 			avr_IO[port] = 0;
 		break;
@@ -553,15 +560,15 @@ int main(int argc, char **argv)
 				avr_PC = vec_WDIF;
 				avr_IO[WDTCR] &=~WDIF;
 				continue;
-			} else if(avr_IO[TIFR0] & avr_IO[TIMSK0] & TOV) { // TODO: make more robust, T_OVF_backlog is currently shared...
+			} else if(timer_overflows[0]) {
 				avr_IO[TIFR0] &= ~TOV;
 				avr_PC = vec_TOV0;
-				if(--T_OVF_backlog) avr_INT = 1;
+				if(--timer_overflows[0]) avr_INT = 1;
 				continue;
-			} else if(avr_IO[TIFR1] & avr_IO[TIMSK1] & TOV) {
+			} else if(timer_overflows[1]) {
 				avr_IO[TIFR1] &= ~TOV;
 				avr_PC = vec_TOV1;
-				if(--T_OVF_backlog) avr_INT = 1;
+				if(--timer_overflows[1]) avr_INT = 1;
 				continue;
 			} else if(avr_IO[EECR] & EERIE) {
 				avr_INT = 1; /* always see if EERIE is resolved */
@@ -604,7 +611,7 @@ int main(int argc, char **argv)
 			fprintf(stderr, "%s\n", "breakpoint");
 			do {
 				avr_debug(avr_PC);
-				getchar();
+				//getchar();
 			} while(avr_step() == 0);
 			break;
 		case 3:
