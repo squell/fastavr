@@ -592,6 +592,7 @@ int main(int argc, char **argv)
 				avr_PC  = avr_ADDR[++avr_SP] << 16;
 				avr_PC |= avr_ADDR[++avr_SP] << 8;
 				avr_PC |= avr_ADDR[++avr_SP];
+				avr_cycle -= 5;
 				continue;
 			}
 			break;
