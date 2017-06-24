@@ -132,43 +132,50 @@ static void *watchdog(void *threadid)
 
 enum timer_bits {
 	TSM = 1<<7, PSRASY = 1<<1, PSRSYNC = 1<<0, /* GTCCR */
-	TOV = 1<<0                                 /* TIMSKn & TIFRn */
+	TOV = 1<<0,                                /* TIMSKn & TIFRn */
+	AS2 = 1<<5                                 /* ASSR */
 };
 
-static void simulate_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits, int offset, volatile unsigned *overflow_events)
-{
-	/* the prescaler is shared for all timers */
-	static unsigned long long last_reset;
-	static unsigned long long prev_cycle;
-	static unsigned long long counted_cycle;
-
-	tccr = avr_IO[tccr] & 7;
-	if(!tccr) return;
-
-	if(avr_IO[GTCCR]&PSRSYNC) {
-		if(last_reset != counted_cycle)
-			last_reset = counted_cycle += avr_cycle - prev_cycle;
-	} else {
-		counted_cycle += avr_cycle - prev_cycle;
-	}
-	prev_cycle = avr_cycle;
-
-	if(prev) {
-		/* assume we are reading the register before the clock increases */
-		int h = 1 - (tccr >> 2);
-		int w = (2+h)*(tccr-h);
-		unsigned long long scaled_count = counted_cycle-1 - (last_reset&(1<<w)-1) >> w;
-		scaled_count += offset;
-		if(*prev >> bits != scaled_count >> bits) {
-			avr_IO[tifr] |= TOV;
-			if(avr_IO[timsk]&TOV) { /* generate overflow interruptions */
-				*overflow_events = (scaled_count >> bits) - (*prev >> bits);
-				avr_INT = 1;
-			}
-		}
-		*prev = scaled_count;
-	}
+#define instantiate_prescaler(simulated_timer, reset, t1, t2, t3, t4, t5, t6, t7) \
+static void simulated_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits, int offset, volatile unsigned *overflow_events) \
+{ \
+	/* the prescaler is shared for all timers */ \
+	static unsigned long long last_reset; \
+	static unsigned long long prev_cycle; \
+	static unsigned long long counted_cycle; \
+ \
+	tccr = avr_IO[tccr] & 7; \
+	if(!tccr) return; \
+ \
+	if(reset) { \
+		if(last_reset != counted_cycle) \
+			last_reset = counted_cycle += avr_cycle - prev_cycle; \
+	} else { \
+		counted_cycle += avr_cycle - prev_cycle; \
+	} \
+	prev_cycle = avr_cycle; \
+ \
+	if(prev) { \
+		/* assume we are reading the register before the clock increases */ \
+		const int tap[7] = { t1,t2,t3,t4,t5,t6,t7 }; \
+		const int w = tap[tccr-1]; \
+		unsigned long long scaled_count = counted_cycle-1 - (last_reset&(1<<w)-1) >> w; \
+		scaled_count += offset; \
+		if(*prev >> bits != scaled_count >> bits) { \
+			avr_IO[tifr] |= TOV; \
+			if(avr_IO[timsk]&TOV) { /* generate overflow interruptions */ \
+				*overflow_events = (scaled_count >> bits) - (*prev >> bits); \
+				avr_INT = 1; \
+			} \
+		} \
+		*prev = scaled_count; \
+	} \
 }
+
+instantiate_prescaler(PRESCALER01, avr_IO[GTCCR]&PSRSYNC, 0, 3, 6, 8, 10, 16, 20)
+instantiate_prescaler(PRESCALER2,  avr_IO[GTCCR]&PSRASY,  0, 3, 5, 6, 7, 8, 10)
+#define PRESCALER0 PRESCALER01
+#define PRESCALER1 PRESCALER01
 
  /* we use I/O functions to
     - fake a UART: accept everything written to UDR0 (0xA6); always report ready on UCSR0A (0xA0)
@@ -194,6 +201,12 @@ enum ucsr_bits {
 #define TIMSK1 0x4F
 #define TIFR1  0x16
 
+#define TCNT2  0x92
+#define TCCR2B 0x91
+#define TIMSK2 0x50
+#define TIFR2  0x17
+#define ASSR   0x96
+
 #define EEARH  0x22
 #define EEARL  0x21
 #define EEDR   0x20
@@ -202,6 +215,7 @@ enum ucsr_bits {
 #define vec_WDIF 0x18
 #define vec_TOV0 0x2E
 #define vec_TOV1 0x28
+#define vec_TOV2 0x1E
 #define vec_EERI 0x3C
 #define vec_UDRE 0x34
 #define vec_TXC  0x36
@@ -214,13 +228,13 @@ enum eecr_bits {
 /* the "temp" register to get 16-bit reads/writes */
 static unsigned char TEMP;
 /* offsets to derive the counters from the free-running prescaler */
-static unsigned long long timer[2];
-static int timer_ofs[2];
+static unsigned long long timer[3];
+static int timer_ofs[3];
 /* number of overflow events to catch up on */
-static volatile unsigned timer_overflows[2];
+static volatile unsigned timer_overflows[3];
 
 #define fetch_timer(n) \
-	simulate_timer(&timer[n], TCCR##n##B, TIFR##n, TIMSK##n, n==1? 16 : 8, timer_ofs[n], &timer_overflows[n])
+	PRESCALER##n(&timer[n], TCCR##n##B, TIFR##n, TIMSK##n, n==1? 16 : 8, timer_ofs[n], &timer_overflows[n])
 
 #define set_timer(n, val) \
 	fetch_timer(n); \
@@ -233,6 +247,7 @@ static void timer_poll_handler(int sig)
 {
 	fetch_timer(0);
 	fetch_timer(1);
+	fetch_timer(2);
 }
 
 #define OR(x,y) __sync_fetch_and_or(&x,y)
@@ -434,11 +449,17 @@ void avr_io_out(int port, unsigned char prev)
 
 	case TIFR0:
 	case TIFR1:
+	case TIFR2:
 		avr_IO[port] = 0; /* any write clears the flag */
 		break;
 	case TCNT0:
 		avr_cycle++;
 		set_timer(0, avr_IO[TCNT0]);
+		avr_cycle--;
+		break;
+	case TCNT2:
+		avr_cycle++;
+		set_timer(2, avr_IO[TCNT2]);
 		avr_cycle--;
 		break;
 	case TCNT1L:
@@ -452,14 +473,19 @@ void avr_io_out(int port, unsigned char prev)
 	case TCCR0B:
 		set_timer(0, avr_IO[TCNT0]);
 		break;
-	case TCCR1B: /* duplicate code to avoid re-use of TEMP */
+	case TCCR2B:
+		set_timer(2, avr_IO[TCNT2]);
+		break;
+	case TCCR1B:
 		set_timer(1, avr_IO[TCNT1L]+avr_IO[TCNT1H]*0x100);
 		break;
 	case GTCCR:
 		avr_IO[port] ^= prev&(PSRASY|PSRSYNC);
-		simulate_timer(NULL, GTCCR, 0,0,0, 0, NULL); /* resets the prescaler if demanded */
+		PRESCALER01(NULL, GTCCR, 0,0,0, 0, NULL); /* resets the prescaler if demanded */
+		PRESCALER2 (NULL, GTCCR, 0,0,0, 0, NULL);
 		avr_IO[port] ^= prev&(PSRASY|PSRSYNC);
-		simulate_timer(NULL, GTCCR, 0,0,0, 0, NULL); /* resets the prescaler if demanded */
+		PRESCALER01(NULL, GTCCR, 0,0,0, 0, NULL);
+		PRESCALER2 (NULL, GTCCR, 0,0,0, 0, NULL);
 		if(!(avr_IO[port]&TSM))
 			avr_IO[port] = 0;
 		break;
@@ -570,6 +596,11 @@ int main(int argc, char **argv)
 				avr_IO[TIFR1] &= ~TOV;
 				avr_PC = vec_TOV1;
 				if(--timer_overflows[1]) avr_INT = 1;
+				continue;
+			} else if(timer_overflows[2]) {
+				avr_IO[TIFR2] &= ~TOV;
+				avr_PC = vec_TOV2;
+				if(--timer_overflows[2]) avr_INT = 1;
 				continue;
 			} else if(avr_IO[EECR] & EERIE) {
 				avr_INT = 1; /* always see if EERIE is resolved */
