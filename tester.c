@@ -131,8 +131,8 @@ static void *watchdog(void *threadid)
 #define GTCCR  0x23
 
 enum timer_bits {
-	TSM = 1<<7, PSRSYNC = 1<<0, /* GTCCR */
-	TOV = 1<<0                  /* TIMSKn & TIFRn */
+	TSM = 1<<7, PSRASY = 1<<1, PSRSYNC = 1<<0, /* GTCCR */
+	TOV = 1<<0                                 /* TIMSKn & TIFRn */
 };
 
 static void simulate_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits, int offset, volatile unsigned *overflow_events)
@@ -456,8 +456,9 @@ void avr_io_out(int port, unsigned char prev)
 		set_timer(1, avr_IO[TCNT1L]+avr_IO[TCNT1H]*0x100);
 		break;
 	case GTCCR:
-		if(!(avr_IO[port]&PSRSYNC)) avr_IO[port] = 0; /* TSM=1/PSRSYNC=0 ?? */
-		avr_IO[port] |= prev&PSRSYNC;
+		avr_IO[port] ^= prev&(PSRASY|PSRSYNC);
+		simulate_timer(NULL, GTCCR, 0,0,0, 0, NULL); /* resets the prescaler if demanded */
+		avr_IO[port] ^= prev&(PSRASY|PSRSYNC);
 		simulate_timer(NULL, GTCCR, 0,0,0, 0, NULL); /* resets the prescaler if demanded */
 		if(!(avr_IO[port]&TSM))
 			avr_IO[port] = 0;
