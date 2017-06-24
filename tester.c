@@ -143,9 +143,11 @@ static void simulated_timer(unsigned long long *prev, int tccr, int tifr, int ti
 	static unsigned long long last_reset; \
 	static unsigned long long prev_cycle; \
 	static unsigned long long counted_cycle; \
+	static volatile char busy = 0; /* this function is not re-entrant*/ \
  \
 	tccr = avr_IO[tccr] & 7; \
-	if(!tccr) return; \
+	if(!tccr || busy) return; \
+	busy++; \
  \
 	if(reset) { \
 		if(last_reset != counted_cycle) \
@@ -170,6 +172,7 @@ static void simulated_timer(unsigned long long *prev, int tccr, int tifr, int ti
 		} \
 		*prev = scaled_count; \
 	} \
+	busy--; \
 }
 
 instantiate_prescaler(PRESCALER01, avr_IO[GTCCR]&PSRSYNC, 0, 3, 6, 8, 10, 16, 20)
