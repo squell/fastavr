@@ -136,7 +136,7 @@ enum timer_bits {
 	AS2 = 1<<5                                 /* ASSR */
 };
 
-#define instantiate_prescaler(simulated_timer, reset, t1, t2, t3, t4, t5, t6, t7) \
+#define instantiate_prescaler(simulated_timer, reset, t1, t2, t3, t4, t5, t6, t7, clock_src) \
 static void simulated_timer(unsigned long long *prev, int tccr, int tifr, int timsk, int bits, int offset, volatile unsigned *overflow_events) \
 { \
 	/* the prescaler is shared for all timers */ \
@@ -144,6 +144,7 @@ static void simulated_timer(unsigned long long *prev, int tccr, int tifr, int ti
 	static unsigned long long prev_cycle; \
 	static unsigned long long counted_cycle; \
 	static volatile char busy = 0; /* this function is not re-entrant*/ \
+	unsigned long long cycle = clock_src; \
  \
 	tccr = avr_IO[tccr] & 7; \
 	if(!tccr || busy) return; \
@@ -151,11 +152,11 @@ static void simulated_timer(unsigned long long *prev, int tccr, int tifr, int ti
  \
 	if(reset) { \
 		if(last_reset != counted_cycle) \
-			last_reset = counted_cycle += avr_cycle - prev_cycle; \
+			last_reset = counted_cycle += cycle - prev_cycle; \
 	} else { \
-		counted_cycle += avr_cycle - prev_cycle; \
+		counted_cycle += cycle - prev_cycle; \
 	} \
-	prev_cycle = avr_cycle; \
+	prev_cycle = cycle; \
  \
 	if(prev) { \
 		/* assume we are reading the register before the clock increases */ \
@@ -174,11 +175,6 @@ static void simulated_timer(unsigned long long *prev, int tccr, int tifr, int ti
 	} \
 	busy--; \
 }
-
-instantiate_prescaler(PRESCALER01, avr_IO[GTCCR]&PSRSYNC, 0, 3, 6, 8, 10, 16, 20)
-instantiate_prescaler(PRESCALER2,  avr_IO[GTCCR]&PSRASY,  0, 3, 5, 6, 7, 8, 10)
-#define PRESCALER0 PRESCALER01
-#define PRESCALER1 PRESCALER01
 
  /* we use I/O functions to
     - fake a UART: accept everything written to UDR0 (0xA6); always report ready on UCSR0A (0xA0)
@@ -227,6 +223,18 @@ enum ucsr_bits {
 enum eecr_bits {
 	EEPM1 = 1<<5, EEPM0 = 1<<4, EERIE = 1<<3, EEMPE = 1<<2, EEPE = 1<<1, EERE = 1<<0
 };
+
+static unsigned long long oscillator(unsigned long long freq)
+{
+	struct timespec ts = { 0, 0 };
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec*freq + ts.tv_nsec*freq / 1000000000;
+}
+
+instantiate_prescaler(PRESCALER01, avr_IO[GTCCR]&PSRSYNC, 0, 3, 6, 8, 10, 16, 20, avr_cycle)
+instantiate_prescaler(PRESCALER2,  avr_IO[GTCCR]&PSRASY,  0, 3, 5, 6, 7, 8, 10,   (avr_IO[ASSR]&AS2)?oscillator(32768):avr_cycle)
+#define PRESCALER0 PRESCALER01
+#define PRESCALER1 PRESCALER01
 
 /* the "temp" register to get 16-bit reads/writes */
 static unsigned char TEMP;
