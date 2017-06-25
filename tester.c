@@ -482,6 +482,12 @@ static void ctrlC_handler(int sig)
 	if(avr_INT && count++ >= 16) abort();
 }
 
+static struct termios stdin_termios;
+static void restore_stdin(void)
+{
+	tcsetattr(STDIN_FILENO, TCSANOW, &stdin_termios);
+}
+
 int main(int argc, char **argv)
 {
 	memset(avr_FLASH, 0xFF, 0x40000);
@@ -514,6 +520,8 @@ int main(int argc, char **argv)
 	if(isatty(STDIN_FILENO)) {
 		struct termios ctrl;
 		tcgetattr(STDIN_FILENO, &ctrl);
+		stdin_termios = ctrl;
+		atexit(restore_stdin);
 		ctrl.c_lflag &= ~ICANON; /* make stdin unbuffered */
 		tcsetattr(STDIN_FILENO, TCSANOW, &ctrl);
 	}
