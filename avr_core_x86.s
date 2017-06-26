@@ -755,12 +755,12 @@ ld_st:
 1:
     .endif
 
-    movzx ebp, word ptr [eax]
+    mov bp, [eax]
     bt ecx, 1   # handle pre-decrement/post-increment here
-    sbb ebp, 0
+    sbb bp, 0
     mov esi, ebp
     bt ecx, 0
-    adc ebp, 0
+    adc bp, 0
 .if RAMEND < 256
     mov cx, bp
     mov [eax], cl
