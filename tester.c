@@ -61,6 +61,8 @@ void avr_debug(unsigned long ip)
 
 /* usleep is deprecated in POSIX */
 #define usleep(us) \
+	{ const struct timespec ts = { us/1000000, (us%1000000)*1000 }; nanosleep(&ts, NULL); }
+#define clock_usleep(us) \
 	{ struct timespec ts; \
 	  clock_gettime(CLOCK_MONOTONIC, &ts); \
 	  ts.tv_nsec += us*1000; \
@@ -116,7 +118,12 @@ static void *watchdog(void *threadid)
 			timer = 0;
 			last_wdr = cur;
 		}
-		usleep(1024);
+#ifdef WD_REALTIME
+		/* threshold is in units of 1024 watchdog cycles, which runs at 128khz */
+		clock_usleep(1024*1000/128);
+#else
+		clock_usleep(1024);
+#endif
 	}
 	return NULL;
 }
@@ -630,16 +637,17 @@ int main(int argc, char **argv)
 				switch(avr_IO[UCSR0B] & avr_IO[UCSR0A] & (TXC|UDRE)) {
 				case UDRE: /* UDR empty - do not clear flag */
 				case TXC|UDRE:
-					avr_INT = 1; /* always see if UDR is resolved */
+					avr_INT = 1; /* there might be more IO-related interrupts */
 					avr_PC = vec_UDRE;
 					continue;
 				case TXC:  /* TX complete - clear flag, set UDRE */
+					avr_INT = 1;
 					avr_PC = vec_TXC;
 					AND(avr_IO[UCSR0A], ~TXC);
 					continue;
 				default:
 					if(avr_IO[UCSR0B] & avr_IO[UCSR0A] & RXC) {
-						avr_INT = 1; /* always check if RXC is resolved */
+						avr_INT = 1;
 						avr_PC = vec_RXC;
 						continue;
 					}
