@@ -1,6 +1,6 @@
 /*
 
- IHEX8 reader
+ IHEX16 reader
 
  Copyright (c) 2014 Marc Schoolderman
 
@@ -44,7 +44,7 @@ static int hex_byte(const char *p)
 	return value;
 }
 
-ssize_t ihex_read(const char *fname, void *image_ptr, size_t capacity)
+ssize_t ihex_read(const char *fname, void *image_ptr, size_t capacity, unsigned long *boot_addr)
 {
 	unsigned char *image = image_ptr;
 	FILE *f;
@@ -101,6 +101,9 @@ ssize_t ihex_read(const char *fname, void *image_ptr, size_t capacity)
 			return size;
 		} else if(type == 2 && len == 2) {
 			segment = (hex_byte(buffer+9)<<8 | hex_byte(buffer+11)) * 16;
+		} else if(type == 3 && boot_addr) {
+			*boot_addr = (hex_byte(buffer+ 9)<<8 | hex_byte(buffer+11)) * 16 +
+				     (hex_byte(buffer+13)<<8 | hex_byte(buffer+15));
 		} else {
 			fprintf(stderr, "%s:%ld: unsupport frame type: type %d, %d bytes\n", fname, lnr, type, len);
 			goto abort;

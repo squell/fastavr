@@ -1,8 +1,8 @@
 /*
 
- IHEX8 writer
+ IHEX16 writer
 
- Copyright (c) 2014 Marc Schoolderman
+ Copyright (c) 2017 Marc Schoolderman
 
  Permission to use, copy, modify, and/or distribute this software for
  any purpose with or without fee is hereby granted, provided that the
@@ -21,7 +21,7 @@
 #include <stdio.h>
 #include "ihexread.h"
 
-ssize_t ihex_write(const char *fname, void *image_ptr, size_t bytes)
+ssize_t ihex_write(const char *fname, void *image_ptr, size_t bytes, unsigned long boot_addr)
 {
 	unsigned char *image = image_ptr;
 	size_t addr = 0;
@@ -48,6 +48,11 @@ ssize_t ihex_write(const char *fname, void *image_ptr, size_t bytes)
 		}
 		fprintf(f, "%02X\n", (-sum)&0xFF);
 	}
+
+	if(boot_addr)
+		fprintf(f, ":04000003%08lX%02X\n", boot_addr&0xFFFF|(boot_addr&0xF0000)<<12,
+		                                   (unsigned)(-(boot_addr&0xFF)-(boot_addr>>8&0xFF)-(boot_addr>>16&0xF)-7 & 0xFF));
+
 	fprintf(f, ":00000001FF\n");
 	return fclose(f);
 }

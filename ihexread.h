@@ -20,5 +20,5 @@
 
 #include <sys/types.h>
 
-extern ssize_t ihex_read(const char *fname, void *image, size_t capacity);
-extern ssize_t ihex_write(const char *fname, void *image_ptr, size_t bytes);
+extern ssize_t ihex_read(const char *fname, void *image, size_t capacity, unsigned long *boot_addr);
+extern ssize_t ihex_write(const char *fname, void *image_ptr, size_t bytes, unsigned long boot_addr);

@@ -71,7 +71,7 @@ BIGPC    = FLASHEND > 0xFFFF
 
    callable functions:
 
-   void avr_reset()	resets the avr (doesn't clear the SRAM/registers/etc)
+   void avr_reset()	resets the avr (doesn't clear the SRAM/registers/etc), resume execution at avr_BOOT_PC
    int avr_run()	runs the avr until sleep/break or an interrupt occurs
    int avr_step()	as avr_run(), but executes only a single instruction
 
@@ -100,6 +100,7 @@ BIGPC    = FLASHEND > 0xFFFF
 .global avr_run
 .global avr_step
 .global avr_PC
+.global avr_BOOT_PC
 .global avr_ADDR
 .global avr_IO
 .global avr_FLASH
@@ -363,8 +364,9 @@ popa
 
 .p2align 3
 avr_reset:
-    xor eax, eax
+    mov eax, [avr_BOOT_PC]
     mov [avr_PC], eax
+    xor eax, eax
     mov [avr_cycle], eax
     mov [avr_cycle+4], eax
     mov [avr_last_wdr], eax
@@ -1481,6 +1483,8 @@ avr_ADDR:
 avr_FLASH:
     .space 0x2000000
 avr_INTR:
+    .long 0
+avr_BOOT_PC:
     .long 0
 
 avr_INT  = avr_INTR+1

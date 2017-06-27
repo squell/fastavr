@@ -20,7 +20,7 @@ extern volatile unsigned char avr_IO[];
 extern volatile unsigned char avr_INT;
 extern volatile unsigned long avr_INTR;
 
-extern unsigned long avr_PC;
+extern unsigned long avr_PC, avr_BOOT_PC;
 extern unsigned char avr_ADDR[];
 extern unsigned short int avr_FLASH[];
 extern unsigned short int avr_SP;
@@ -41,7 +41,7 @@ static volatile enum { INTR, WDRESET, XRESET, POWEROFF } INT_reason;
 /* note: consider calling this at regular intervals from a thread? */
 void eeprom_commit(void)
 {
-	if(eeprom_nonvolatile && ihex_write(eeprom_file, eeprom, eeprom_nonvolatile) != 0) {
+	if(eeprom_nonvolatile && ihex_write(eeprom_file, eeprom, eeprom_nonvolatile, 0) != 0) {
 		fprintf(stderr, "error writing %s\n", eeprom_file);
 		exit(2);
 	}
@@ -540,17 +540,18 @@ int main(int argc, char **argv)
 		fprintf(stderr, "usage: tester flash.hex [eeprom.hex]]\n");
 		return 2;
 	} else {
-		int n = ihex_read(argv[1], avr_FLASH, 0x40000);
+		int n = ihex_read(argv[1], avr_FLASH, 0x40000, &avr_BOOT_PC);
 		if(n < 0)  {
 			fprintf(stderr, "could not read %s\n", argv[1]);
 			return 2;
 		}
-		fprintf(stderr, "%d bytes read\n", n);
+		avr_BOOT_PC >>= 1;
+		fprintf(stderr, "%d bytes read, startup at %04lX\n", n, avr_BOOT_PC);
 	}
 
 	memset(eeprom, 0xFF, sizeof eeprom);
 	if(argv[2]) {
-		int n = ihex_read(eeprom_file=argv[2], eeprom, sizeof eeprom);
+		int n = ihex_read(eeprom_file=argv[2], eeprom, sizeof eeprom, NULL);
 		if(n < 0) {
 			fprintf(stderr, "could not read %s\n", argv[2]);
 			return 2;
