@@ -12,7 +12,7 @@
 #include "ihexread.h"
 
 /* #define THREAD_IO 10 */
-/* #define THREAD_TIMER 1000 */
+#define THREAD_TIMER 100
 
 extern volatile unsigned long long avr_cycle;
 extern volatile unsigned long avr_last_wdr;
@@ -238,7 +238,8 @@ static unsigned long long oscillator(unsigned long long freq)
 	return ts.tv_sec*freq + ts.tv_nsec*freq / 1000000000;
 }
 
-instantiate_prescaler(PRESCALER01, avr_IO[GTCCR]&PSRSYNC, 0, 3, 6, 8, 10, 16, 20, avr_cycle)
+/* let timer0 and timer1 fake a 16mhz unit -- does mean that they cannot be used anymore for cycle measurement */
+instantiate_prescaler(PRESCALER01, avr_IO[GTCCR]&PSRSYNC, 0, 3, 6, 8, 10, 16, 20, oscillator(16000000))
 instantiate_prescaler(PRESCALER2,  avr_IO[GTCCR]&PSRASY,  0, 3, 5, 6, 7, 8, 10,   (avr_IO[ASSR]&AS2)?oscillator(32768):avr_cycle)
 #define PRESCALER0 PRESCALER01
 #define PRESCALER1 PRESCALER01
@@ -295,11 +296,6 @@ static void *fake_console(void *threadid)
 			if(avr_IO[UCSR0B] & (TXC|UDRE))
 				avr_INT = 1;
 #endif
-			if(c == 0x04) {
-				fprintf(stderr, "end of transmission\n");
-				avr_debug(0);
-				exit(0);
-			}
 			putchar(c);
 #ifdef BAUD
 			usleep(10000000/BAUD);
