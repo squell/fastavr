@@ -515,6 +515,31 @@ void avr_io_out(int port, unsigned char prev)
 			last_wdce = avr_cycle;
 		avr_IO[port] &= ~(WDCE | avr_IO[port]&WDIF);
 		break;
+
+#define PINA  0x00
+#define PORTA 0x02
+#define PINB  0x03
+#define PORTB 0x05
+#define PINC  0x06
+#define PORTC 0x08
+#define PIND  0x09
+#define PORTD 0x0B
+	case PINA:
+	case PINB:
+	case PINC:
+	case PIND:
+		prev = avr_IO[port+2];
+		avr_IO[port+2] ^= avr_IO[port];
+		avr_IO[port] = 0;
+		port+=2;
+		int i;
+	case PORTA:
+	case PORTB:
+	case PORTC:
+	case PORTD:
+		for(i=0; i<8; i++) if((avr_IO[port]&~prev)&(1<<i))
+			fprintf(stderr, "<%c%u>", 'A'+(port-2)/3, i);
+		break;
 	}
 }
 
