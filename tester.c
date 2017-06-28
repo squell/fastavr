@@ -34,7 +34,7 @@ static unsigned char eeprom[0x10000];
 static size_t eeprom_nonvolatile;
 static const char *eeprom_file;
 
-static volatile enum { INTR, WDRESET, XRESET } INT_reason;
+static volatile enum { INTR, WDRESET, XRESET, POWEROFF } INT_reason;
 
 #define reset break
 
@@ -84,7 +84,7 @@ enum wdtcr_bits {
 };
 
 enum mcusr_bits {
-	WDRF = 1<<3, EXTRF = 1<<1, PORF = 1<<0
+	WDRF = 1<<3, BORF = 1<<2, EXTRF = 1<<1, PORF = 1<<0
 };
 
 #ifndef WD_FREQ
@@ -518,17 +518,17 @@ void avr_io_out(int port, unsigned char prev)
 	}
 }
 
-static void ctrlC_handler(int sig)
+static void ctrl_handler(int sig)
 {
 	static int count;    /* fallback */
-	INT_reason = XRESET;
+	INT_reason = sig==SIGINT? XRESET : POWEROFF;
 	avr_SREG = 0x80;     /* not as good as the watchdog force-quit */
 	avr_INT = 1;
-	if(avr_INT && count++ >= 16) abort();
+	if(sig==POWEROFF && count++) abort();
 }
 
 static struct termios stdin_termios;
-static void restore_stdin(void)
+static void restore_stdin()
 {
 	tcsetattr(STDIN_FILENO, TCSANOW, &stdin_termios);
 }
@@ -559,7 +559,8 @@ int main(int argc, char **argv)
 		eeprom_nonvolatile = n;
 	}
 
-	signal(SIGINT, ctrlC_handler);
+	signal(SIGINT,  ctrl_handler);
+	signal(SIGQUIT, ctrl_handler);
 	if(isatty(STDOUT_FILENO)) setbuf(stdout, NULL);
 
 	if(isatty(STDIN_FILENO)) {
@@ -567,12 +568,13 @@ int main(int argc, char **argv)
 		tcgetattr(STDIN_FILENO, &ctrl);
 		stdin_termios = ctrl;
 		atexit(restore_stdin);
+		signal(SIGABRT, restore_stdin);
 		ctrl.c_lflag &= ~ICANON; /* make stdin unbuffered */
 		tcsetattr(STDIN_FILENO, TCSANOW, &ctrl);
 	}
 
 	avr_reset();
-	avr_IO[MCUSR] |= PORF;
+	avr_IO[MCUSR]  = PORF;
 	avr_IO[UCSR0A] = UDRE;
 	/* avr_IO[WDTCSR] |= WDE; uncomment this to start the watchdog timer by default */
 	pthread_create(&wdt_thread, NULL, watchdog, NULL);
@@ -598,15 +600,20 @@ int main(int argc, char **argv)
 	do {
 		switch( avr_run() ) {
 		case 0:
-			if(INT_reason == XRESET) {
+			if(INT_reason == POWEROFF) {
+				fprintf(stderr, "%s\n", "powered down");
+				avr_reset();
+				avr_IO[MCUSR] = BORF;
+				break;
+			} else if(INT_reason == XRESET) {
 				fprintf(stderr, "%s\n", "external reset");
 				avr_reset();
-				avr_IO[MCUSR] |= EXTRF;
+				avr_IO[MCUSR] = EXTRF;
 				reset;
 			} else if(INT_reason == WDRESET) {
 				fprintf(stderr, "%s\n", "watchdog reset");
 				avr_reset();
-				avr_IO[MCUSR] |= WDRF;
+				avr_IO[MCUSR] = WDRF;
 				reset;
 			} else if(avr_IO[WDTCSR] & WDIF) {
 				fprintf(stderr, "%s\n", "watchdog interrupt");
