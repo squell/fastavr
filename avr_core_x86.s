@@ -367,6 +367,12 @@ avr_reset:
     mov eax, [avr_BOOT_PC]
     mov [avr_PC], eax
     xor eax, eax
+    push edi
+    lea edi, [avr_IO]
+    lea ecx, [IOEND-0x20]
+    cld
+    rep stosb
+    pop edi
     mov [avr_cycle], eax
     mov [avr_cycle+4], eax
     mov [avr_last_wdr], eax

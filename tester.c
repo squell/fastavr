@@ -599,6 +599,7 @@ int main(int argc, char **argv)
 	ualarm(THREAD_TIMER, THREAD_TIMER);
 #endif
 	do {
+		avr_IO[WDTCSR] |= avr_IO[MCUSR]&WDRF;
 		switch( avr_run() ) {
 		case 0:
 			if(INT_reason == POWEROFF) {
