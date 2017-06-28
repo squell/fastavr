@@ -75,8 +75,8 @@ void avr_debug(unsigned long ip)
 
 /* a watchdog process; behaves mostly according to the datasheet. */
 
-#define MCUSR 0x34
-#define WDTCR 0x21
+#define MCUSR  0x34
+#define WDTCSR 0x40
 
 enum wdtcr_bits {
 	WDIF = 1<<7, WDIE = 1<<6, WDCE = 1<<4, WDE = 1<<3
@@ -86,6 +86,10 @@ enum mcusr_bits {
 	WDRF = 1<<3, EXTRF = 1<<1, PORF = 1<<0
 };
 
+#ifndef WD_FREQ
+#define WD_FREQ 128000
+#endif
+
 static pthread_t wdt_thread;
 
 static void *watchdog(void *threadid)
@@ -94,7 +98,7 @@ static void *watchdog(void *threadid)
 	unsigned long timer = 0;
 	fprintf(stderr, "%s\n", "starting watchdog");
 	for(;;) {
-		unsigned char wdtcr = avr_IO[WDTCR];
+		unsigned char wdtcr = avr_IO[WDTCSR];
 		unsigned long cur = avr_last_wdr;
 		unsigned long threshold = 2ul << ((wdtcr&0x20)/4 + (wdtcr&0x7)) % 10;
 		if(cur == last_wdr && wdtcr&(WDIE|WDE) && ++timer > threshold) {
@@ -103,7 +107,7 @@ static void *watchdog(void *threadid)
 				wdtcr |= WDIF;
 				if(wdtcr & WDE)
 					wdtcr &=~WDIE;
-				avr_IO[WDTCR] = wdtcr;
+				avr_IO[WDTCSR] = wdtcr;
 				timer = 0;
 				avr_INT = 1;
 			} else if(wdtcr & WDE) {
@@ -117,12 +121,8 @@ static void *watchdog(void *threadid)
 			timer = 0;
 			last_wdr = cur;
 		}
-#ifdef WD_REALTIME
 		/* threshold is in units of 1024 watchdog cycles, which runs at 128khz */
-		clock_usleep(1024*1000/128);
-#else
-		clock_usleep(1024);
-#endif
+		clock_usleep(1024*1000000ull/(WD_FREQ));
 	}
 	return NULL;
 }
@@ -506,7 +506,7 @@ void avr_io_out(int port, unsigned char prev)
 		if(!(avr_IO[port]&TSM))
 			avr_IO[port] = 0;
 		break;
-	case WDTCR:
+	case WDTCSR:
 		if(avr_cycle-last_wdce > 4 || avr_IO[MCUSR]&WDRF) {
 			avr_IO[port] = prev&0x2F | avr_IO[port]&~0x27;
 		}
@@ -573,7 +573,7 @@ int main(int argc, char **argv)
 	avr_reset();
 	avr_IO[MCUSR] |= PORF;
 	avr_IO[UCSR0A] = UDRE;
-	/* avr_IO[WDTCR] |= WDE; uncomment this to start the watchdog timer by default */
+	/* avr_IO[WDTCSR] |= WDE; uncomment this to start the watchdog timer by default */
 	pthread_create(&wdt_thread, NULL, watchdog, NULL);
 #ifdef THREAD_IO
 	pthread_create(&tty_thread, NULL, fake_console, NULL);
@@ -607,10 +607,10 @@ int main(int argc, char **argv)
 				avr_reset();
 				avr_IO[MCUSR] |= WDRF;
 				reset;
-			} else if(avr_IO[WDTCR] & WDIF) {
+			} else if(avr_IO[WDTCSR] & WDIF) {
 				fprintf(stderr, "%s\n", "watchdog interrupt");
 				avr_PC = vec_WDIF;
-				avr_IO[WDTCR] &=~WDIF;
+				avr_IO[WDTCSR] &=~WDIF;
 				continue;
 			} else if(timer_overflows[0]) {
 				avr_IO[TIFR0] &= ~TOV;

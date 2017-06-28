@@ -1,5 +1,5 @@
 ldi r16, 0x69 ; set prescale to max, WDE and WDIE
-out 0x21, r16
+sts 0x60, r16
 begin:
 .rept 9
 cli;	 make it hard for the emulator to interrupt

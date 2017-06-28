@@ -3,11 +3,11 @@
 
 ldi r17, 0x30 ; set wdce
 ldi r16, 0x69 ; set prescale to max, WDE and WDIE
-out 0x21, r17
+sts 0x60, r17
 nop
 nop
 nop
-out 0x21, r16
+sts 0x60, r16
 sei
 begin: .rept 0x18-9  ; change to something else to get a watchdog reset
 rjmp begin
