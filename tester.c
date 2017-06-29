@@ -36,7 +36,7 @@ static const char *eeprom_file;
 
 static volatile enum { INTR, WDRESET, XRESET, POWEROFF } INT_reason;
 
-#define reset break
+#define reset { INT_reason = INTR; continue; }
 
 /* note: consider calling this at regular intervals from a thread? */
 void eeprom_commit(void)
@@ -673,7 +673,13 @@ int main(int argc, char **argv)
 		case 1:
 			/* TODO: allow resuming execution on WDT (or possible USART) interrupts */
 			fprintf(stderr, "%s\n", "mcu idle");
-			break;
+			do {
+				avr_cycle+=2;
+			wait_for_interrupt:
+				timer_poll_handler(SIGALRM);
+				sched_yield();
+			} while(!avr_INT);
+			continue;
 		case 2:
 			fprintf(stderr, "%s\n", "breakpoint");
 			do {
@@ -683,7 +689,10 @@ int main(int argc, char **argv)
 			break;
 		case 3:
 			fprintf(stderr, "%s\n", "mcu spinlocked");
-			break;
+			if(avr_SREG & 0x80) goto wait_for_interrupt;
+			while(!avr_INT || INT_reason == INTR) /* wait for a hard reset */
+				sched_yield();
+			continue;
 		default:
 			fprintf(stderr, "unexpected situation: PC=%04lx instruction=%04x\n", avr_PC-1, avr_FLASH[avr_PC-1]);
 			break;

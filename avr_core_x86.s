@@ -566,11 +566,6 @@ rjmp:
     movzx edx, word ptr [avr_FLASH+(edi-1)*2]
     shl edx, 4+16
     sar edx, 4+16
-.if ABORTDETECT
-    cmp edx, -1
-    mov esi, 3
-    je exit
-.endif
     lea edi, [edi+edx]
     shr eax, 3
 .if BIGPC
@@ -581,6 +576,11 @@ rjmp:
     adc dword ptr [avr_cycle], 1
 .endif
     adc dword ptr [avr_cycle+4], 0
+.if ABORTDETECT
+    cmp edx, -1
+    mov esi, 3
+    je exit
+.endif
     resume
 
 .p2align 3
