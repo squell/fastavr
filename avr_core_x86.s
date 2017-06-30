@@ -1071,6 +1071,7 @@ f_ret:
     shl dl, 7
     or [avr_SREG], dl    # set the IF in SREG if RETI
     movzx eax, word ptr [avr_SP]
+# if avr_SP wraps around (undefined behaviour), reads portion of avr_FLASH
 .if BIGPC
     mov edi, [avr_ADDR+eax] # the junk read in the LSB is ignored later
     bswap edi
@@ -1463,13 +1464,13 @@ avr_cycle:
     .long 0
 avr_last_wdr:
     .long 0
-avr_INTR:
+avr_PC: # can get clobbered by rcall/f_*_jump/interrupt (with avr_SP near 0)
     .long 0
 avr_ADDR:
     .space 0x10000
 avr_FLASH:
     .space 0x2000000
-avr_PC:
+avr_INTR:
     .long 0
 
 avr_INT  = avr_INTR+1
