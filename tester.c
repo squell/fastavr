@@ -62,12 +62,6 @@ void avr_debug(unsigned long ip)
 /* usleep is deprecated in POSIX */
 #define usleep(us) \
 	{ const struct timespec ts = { (us)/1000000, ((us)%1000000)*1000 }; nanosleep(&ts, NULL); }
-#define clock_usleep(us) \
-	{ struct timespec ts; \
-	  clock_gettime(CLOCK_MONOTONIC, &ts); \
-	  ts.tv_nsec  = (ts.tv_nsec + (us)*1000)%1000000000; \
-	  ts.tv_sec  += (ts.tv_nsec + (us)*1000)/1000000000; \
-	  while(clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL)); }
 #define ualarm(us,iv) \
 	{ const struct timeval u_tv = { (us)/1000000, (us)%1000000 }; \
 	  const struct timeval i_tv = { (iv)/1000000, (iv)%1000000 }; \
@@ -123,7 +117,7 @@ static void *watchdog(void *threadid)
 			last_wdr = cur;
 		}
 		/* threshold is in units of 1024 watchdog cycles, which runs at 128khz */
-		clock_usleep(1024*1000000ull/(WD_FREQ));
+		usleep(1024*1000000ull/(WD_FREQ));
 	}
 	return NULL;
 }
@@ -554,6 +548,13 @@ static void restore_stdin()
 	tcsetattr(STDIN_FILENO, TCSANOW, &stdin_termios);
 }
 
+static pthread_t signal_thread;
+
+static void *signal_catcher(void *arg)
+{
+	for(;;) usleep(1000000);
+}
+
 int main(int argc, char **argv)
 {
 	memset(avr_FLASH, 0xFF, 0x40000);
@@ -599,7 +600,6 @@ int main(int argc, char **argv)
 	avr_IO[MCUSR]  = PORF;
 	avr_IO[UCSR0A] = UDRE;
 	/* avr_IO[WDTCSR] |= WDE; uncomment this to start the watchdog timer by default */
-	pthread_create(&wdt_thread, NULL, watchdog, NULL);
 #ifdef THREAD_IO
 	pthread_create(&tty_thread, NULL, fake_console, NULL);
 	pthread_create(&rbr_thread, NULL, fake_receiver, NULL);
@@ -607,6 +607,7 @@ int main(int argc, char **argv)
 	signal(SIGIO, io_input_handler);
 	fcntl(STDIN_FILENO, F_SETOWN, getpid());
 	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_ASYNC | O_NONBLOCK);
+	pthread_create(&signal_thread, NULL, signal_catcher, NULL);
 #endif
 #ifdef THREAD_TIMER
 	{
@@ -619,6 +620,7 @@ int main(int argc, char **argv)
 	signal(SIGALRM, timer_poll_handler);
 	ualarm(THREAD_TIMER, THREAD_TIMER);
 #endif
+	pthread_create(&wdt_thread, NULL, watchdog, NULL);
 	do {
 		avr_IO[WDTCSR] |= avr_IO[MCUSR]&WDRF;
 		switch( avr_run() ) {
