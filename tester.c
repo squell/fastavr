@@ -68,6 +68,11 @@ void avr_debug(unsigned long ip)
 	  const struct timeval i_tv = { (iv)/1000000, (iv)%1000000 }; \
 	  const struct itimerval itv = { i_tv, u_tv }; \
 	  setitimer(ITIMER_REAL, &itv, NULL); }
+#define uvalarm(us,iv) \
+	{ const struct timeval u_tv = { (us)/1000000, (us)%1000000 }; \
+	  const struct timeval i_tv = { (iv)/1000000, (iv)%1000000 }; \
+	  const struct itimerval itv = { i_tv, u_tv }; \
+	  setitimer(ITIMER_VIRTUAL, &itv, NULL); }
 
 /* a watchdog process; behaves mostly according to the datasheet. */
 
@@ -86,40 +91,33 @@ enum mcusr_bits {
 #define WD_FREQ 128000
 #endif
 
-static pthread_t wdt_thread;
-
-static void *watchdog(void *threadid)
+void watchdog(int alarm)
 {
-	unsigned long last_wdr = 0;
-	unsigned long timer = 0;
-	fprintf(stderr, "%s\n", "starting watchdog");
-	for(;;) {
-		unsigned char wdtcr = avr_IO[WDTCSR];
-		unsigned long cur = avr_last_wdr;
-		unsigned long threshold = 2ul << ((wdtcr&0x20)/4 + (wdtcr&0x7)) % 10;
-		if(cur == last_wdr && wdtcr&(WDIE|WDE) && ++timer > threshold) {
+	static unsigned long last_wdr;
+	static unsigned long timer;
+
+	unsigned char wdtcr = avr_IO[WDTCSR];
+	unsigned long cur = avr_last_wdr;
+	unsigned long threshold = 2ul << ((wdtcr&0x20)/4 + (wdtcr&0x7)) % 10;
+	if(cur == last_wdr && wdtcr&(WDIE|WDE) && ++timer > threshold) {
+		timer = 0;
+		if(wdtcr & WDIE) {
+			wdtcr |= WDIF;
+			if(wdtcr & WDE)
+				wdtcr &=~WDIE;
+			avr_IO[WDTCSR] = wdtcr;
 			timer = 0;
-			if(wdtcr & WDIE) {
-				wdtcr |= WDIF;
-				if(wdtcr & WDE)
-					wdtcr &=~WDIE;
-				avr_IO[WDTCSR] = wdtcr;
-				timer = 0;
-				avr_INT = 1;
-			} else if(wdtcr & WDE) {
-				timer = last_wdr = 0;
-				INT_reason = WDRESET;
-				avr_INT = 1;
-				avr_SREG = 0x80;
-			}
-		} else if(cur != last_wdr) {
-			timer = 0;
-			last_wdr = cur;
+			avr_INT = 1;
+		} else if(wdtcr & WDE) {
+			timer = last_wdr = 0;
+			INT_reason = WDRESET;
+			avr_INT = 1;
+			avr_SREG = 0x80;
 		}
-		/* threshold is in units of 1024 watchdog cycles, which runs at 128khz */
-		usleep(1024*1000000ull/(WD_FREQ));
+	} else if(cur != last_wdr) {
+		timer = 0;
+		last_wdr = cur;
 	}
-	return NULL;
 }
 
 /* scale the cpu cycle count according to TCCRxB, and generate an overflow interrupt if demanded
@@ -621,20 +619,22 @@ int main(int argc, char **argv)
 	signal(SIGIO, io_input_handler);
 	fcntl(STDIN_FILENO, F_SETOWN, getpid());
 	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_ASYNC | O_NONBLOCK);
-	pthread_create(&signal_thread, NULL, signal_catcher, NULL);
 #endif
+	pthread_create(&signal_thread, NULL, signal_catcher, NULL);
 #ifdef THREAD_TIMER
 	{
 		/* block the main CPU thread from getting bogged down with the timer */
 		sigset_t set;
 		sigemptyset(&set);
 		sigaddset(&set, SIGALRM);
+		sigaddset(&set, SIGVTALRM);
 		pthread_sigmask(SIG_BLOCK, &set, NULL);
 	}
 	signal(SIGALRM, timer_poll_handler);
 	ualarm(THREAD_TIMER, THREAD_TIMER);
 #endif
-	pthread_create(&wdt_thread, NULL, watchdog, NULL);
+	signal(SIGVTALRM, watchdog);
+	uvalarm(1024*1000000ull/(WD_FREQ), 1024*1000000ull/(WD_FREQ));
 	do {
 		avr_IO[WDTCSR] |= avr_IO[MCUSR]&WDRF;
 		switch( avr_run() ) {
