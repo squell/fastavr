@@ -69,8 +69,9 @@ void avr_debug(unsigned long ip)
 	  ts.tv_sec  += (ts.tv_nsec + (us)*1000)/1000000000; \
 	  while(clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL)); }
 #define ualarm(us,iv) \
-	{ const struct timeval tv  = { (us)/1000000, (us)%1000000 }; \
-	  const struct itimerval itv = { tv, tv }; \
+	{ const struct timeval u_tv = { (us)/1000000, (us)%1000000 }; \
+	  const struct timeval i_tv = { (iv)/1000000, (iv)%1000000 }; \
+	  const struct itimerval itv = { i_tv, u_tv }; \
 	  setitimer(ITIMER_REAL, &itv, NULL); }
 
 /* a watchdog process; behaves mostly according to the datasheet. */
@@ -592,7 +593,7 @@ int main(int argc, char **argv)
 		pthread_sigmask(SIG_BLOCK, &set, NULL);
 	}
 	signal(SIGALRM, timer_poll_handler);
-	ualarm(THREAD_TIMER,0);
+	ualarm(THREAD_TIMER, THREAD_TIMER);
 #endif
 	do {
 		switch( avr_run() ) {
