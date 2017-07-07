@@ -37,7 +37,7 @@ static const char *eeprom_file;
 
 static volatile enum { INTR, WDRESET, XRESET, POWEROFF } INT_reason;
 
-#define reset { INT_reason = INTR; continue; }
+#define reset { INT_reason = INTR; do; while(kill_with_fire); continue; }
 
 /* note: consider calling this at regular intervals from a thread? */
 void eeprom_commit(void)
@@ -110,8 +110,7 @@ static void *watchdog(void *threadid)
 				timer = last_wdr = 0;
 				INT_reason = WDRESET;
 				avr_INT = 1;
-				while(avr_INT && !(avr_IO[MCUSR]&WDRF)) /* force-quit the emulator */
-					avr_SREG = 0x80;
+				avr_SREG = 0x80;
 			}
 		} else if(cur != last_wdr) {
 			timer = 0;
@@ -538,8 +537,8 @@ static void ctrl_handler(int sig)
 {
 	static int count;    /* fallback */
 	INT_reason = sig==SIGINT? XRESET : POWEROFF;
-	avr_SREG = 0x80;     /* not as good as the watchdog force-quit */
 	avr_INT = 1;
+	avr_SREG = 0x80;
 	if(sig==POWEROFF && count++) abort();
 }
 
@@ -550,10 +549,14 @@ static void restore_stdin()
 }
 
 static pthread_t signal_thread;
+static volatile char kill_with_fire;
 
 static void *signal_catcher(void *arg)
 {
-	for(;;) usleep(1000000);
+	for(;;)
+		if((kill_with_fire=1), INT_reason != INTR || (kill_with_fire=0))
+			avr_SREG = 0x80; /* force-quit the emulator */
+		else usleep(1000000);
 }
 
 #define SPMCSR 0x37
