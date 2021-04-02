@@ -710,6 +710,7 @@ int main(int argc, char **argv)
 		case 1:
 			/* TODO: allow resuming execution on WDT (or possible USART) interrupts */
 			fprintf(stderr, "%s\n", "mcu idle");
+			if(!(avr_SREG & 0x80)) goto wait_for_reset;
 			do {
 				avr_cycle+=2;
 			wait_for_interrupt:
@@ -727,7 +728,8 @@ int main(int argc, char **argv)
 		case 3:
 			fprintf(stderr, "%s\n", "mcu spinlocked");
 			if(avr_SREG & 0x80) goto wait_for_interrupt;
-			while(!avr_INT || INT_reason == INTR) /* wait for a hard reset */
+			wait_for_reset:
+			while(!(avr_INT && INT_reason != INTR)) /* wait for a hard reset */
 				sched_yield();
 			continue;
 		default:
