@@ -13,6 +13,7 @@
 
 /* #define THREAD_IO 10 */
 #define THREAD_TIMER 100
+#define WD_FREQ 128000/64
 
 extern volatile unsigned long long avr_cycle;
 extern volatile unsigned long avr_last_wdr;
@@ -555,6 +556,16 @@ static void *signal_catcher(void *arg)
 	for(;;) usleep(1000000);
 }
 
+#define SPMCSR 0x37
+
+void avr_self_program(int addr, int value)
+{
+	fprintf(stderr, "%02x: %04X <- %02X\n", avr_IO[SPMCSR], addr, value);
+	if((avr_IO[SPMCSR]&0x3F) == 0x01)
+		avr_FLASH[addr/2&0x1FFFF] = value;
+	avr_IO[SPMCSR] = 0x00; //&= ~0x01;
+}
+
 int main(int argc, char **argv)
 {
 	memset(avr_FLASH, 0xFF, 0x40000);
@@ -581,6 +592,9 @@ int main(int argc, char **argv)
 		fprintf(stderr, "%d bytes nonvolatile eeprom\n", n);
 		eeprom_nonvolatile = n;
 	}
+
+	extern const char* make_stdin_pty(void);
+	fprintf(stderr, "connecting terminal: %s\n", make_stdin_pty());
 
 	signal(SIGINT,  ctrl_handler);
 	signal(SIGQUIT, ctrl_handler);
