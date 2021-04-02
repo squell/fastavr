@@ -19,7 +19,7 @@ clean:
 # (reporting last opcode 9588) -- we check this
 selftest: tester tinyTwofish/2fish_avr.s
 	make -B -C example | grep 'Hello, world!'
-	make -B -C tinyTwofish ckat.hex CHIP=atmega328
+	make -B -C tinyTwofish ckat.hex CHIP=atmega2560
 	./tester tinyTwofish/ckat.hex 2>&1 | grep '\[9588\]$$'
 
 tinyTwofish/2fish_avr.s:

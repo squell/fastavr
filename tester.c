@@ -701,9 +701,10 @@ int main(int argc, char **argv)
 				};
 			ignore: /* everything ok, perform an IRET (kind of kludgy) */
 				avr_SREG |= 0x80;
-				avr_PC  = avr_ADDR[++avr_SP] << 8;
+				avr_PC  = avr_ADDR[++avr_SP] << 16;
+				avr_PC |= avr_ADDR[++avr_SP] << 8;
 				avr_PC |= avr_ADDR[++avr_SP];
-				avr_cycle -= 4;
+				avr_cycle -= 5;
 				continue;
 			}
 			break;

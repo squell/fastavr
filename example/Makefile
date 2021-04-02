@@ -10,4 +10,4 @@ clean:
 	avr-objcopy -j .text -j .data -O ihex $< $@
 
 .c.elf:
-	avr-gcc -mmcu=atmega328 $< -o$@
+	avr-gcc -mmcu=atmega2560 $< -o$@
