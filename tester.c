@@ -295,6 +295,7 @@ static void *fake_console(void *threadid)
 			usleep(10000000/BAUD);
 #endif
 		}
+		OR(avr_IO[UCSR0A], UDRE); // in case it is cleared due to a reset
 		usleep(THREAD_IO);
 	}
 }
@@ -369,9 +370,11 @@ void avr_io_in(int port)
 		AND(avr_IO[UCSR0A], ~RXC);
 	case UCSR0A:
 		if((avr_IO[UCSR0A] & RXC) == 0 && (c=getchar()) != EOF) {
-			OR(avr_IO[UCSR0A], RXC), ungetc(c, stdin);
+			OR(avr_IO[UCSR0A], RXC|UDRE), ungetc(c, stdin);
 			if(avr_IO[UCSR0B] & RXC)
 				avr_INT = 1;
+		} else {
+		   OR(avr_IO[UCSR0A], UDRE);
 		}
 #endif
 		break;
@@ -415,11 +418,6 @@ void avr_io_out(int port, unsigned char prev)
 		int c;
 	case UDR0:
 		c = avr_IO[port];
-		if(c == 0x04) {
-			fprintf(stderr, "end of transmission\n");
-			avr_debug(0);
-			exit(0);
-		}
 		putchar(c);
 		OR(avr_IO[UCSR0A], TXC|UDRE);
 		if(avr_IO[UCSR0B] & (TXC|UDRE))
@@ -615,7 +613,6 @@ int main(int argc, char **argv)
 
 	avr_reset();
 	avr_IO[MCUSR]  = PORF;
-	avr_IO[UCSR0A] = UDRE;
 	/* avr_IO[WDTCSR] |= WDE; uncomment this to start the watchdog timer by default */
 #ifdef THREAD_IO
 	pthread_create(&tty_thread, NULL, fake_console, NULL);
