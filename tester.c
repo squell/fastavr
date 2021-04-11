@@ -432,7 +432,7 @@ void avr_io_out(int port, unsigned char prev)
 		}
 		putchar(c);
 		OR(avr_IO[UCSR0A], TXC|UDRE);
-		if(avr_IO[UCSR0B] & TXC|UDRE)
+		if(avr_IO[UCSR0B] & (TXC|UDRE))
 			avr_INT = 1;
 		break;
 #endif
