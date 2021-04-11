@@ -41,7 +41,9 @@ A quick test can be performed by running `make selftest`.
 
 Todo/Limitations
 ====
-* SPM and DES instructions are supported as hooks for C functions; see the `des-support` branch for a AVR-compatible emulation of the DES instruction.
+* SPM and DES instructions are supported as hooks for C functions.
+  + See the `des-support` branch for a AVR-compatible emulation of the DES instruction.
+  + See the `bootloader` branch for a version capable of running bootloaders (and programmable using AVRdude)
 
 * No support for Reduced Core AVR; cycle count not correct for XMEGA microcontrollers.
   
