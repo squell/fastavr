@@ -361,6 +361,11 @@ void avr_io_in(int port)
 		} else {
 			/* fprintf(stderr, "warning: flow control used\n"); */
 		}
+		break;
+	case UCSR0A:
+		if(rdbr_num < sizeof rdbr_buffer) { /* in case it is cleared by a reset */
+			OR(avr_IO[UCSR0A], RXC);
+		}
 #else
 		int c;
 	case UDR0:
@@ -369,12 +374,12 @@ void avr_io_in(int port)
 	case UCSR0A:
 		if((avr_IO[UCSR0A] & RXC) == 0 && (c=getchar()) != EOF) {
 			OR(avr_IO[UCSR0A], RXC|UDRE), ungetc(c, stdin);
-			if(avr_IO[UCSR0B] & RXC)
-				avr_INT = 1;
 		} else {
-		   OR(avr_IO[UCSR0A], UDRE);
+			OR(avr_IO[UCSR0A], UDRE);
 		}
 #endif
+		if(avr_IO[UCSR0A] & avr_IO[UCSR0B] & (RXC|UDRE))
+			avr_INT = 1;
 		break;
 	case TCNT0:
 		fetch_timer(0);
@@ -428,10 +433,7 @@ void avr_io_out(int port, unsigned char prev)
 		break;
 	case UCSR0B:
 		avr_io_in(UCSR0A);
-		if(avr_IO[UCSR0A] & avr_IO[port] & (RXC|UDRE))
-			avr_INT = 1;
 		break;
-
 	case EECR:
 		if(avr_cycle-last_eempe <= 4 && avr_IO[port]&EEPE) { /* execute a write */
 			avr_cycle += 2;
