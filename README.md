@@ -41,10 +41,6 @@ A quick test can be performed by running `make selftest`.
 
 Todo/Limitations
 ====
-* The S flag is always stuck at V⊕O due to the way fastavr handles
-the flags. This should only be noticeable when using SES/SEV/SEO/CLS/CLV/CLO
-or writing SREG via I/O-space
-
 * SPM and DES instructions are supported as hooks for C functions; see the `des-support` branch for a AVR-compatible emulation of the DES instruction.
 
 * No support for Reduced Core AVR; cycle count not correct for XMEGA microcontrollers.

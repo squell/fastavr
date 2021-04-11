@@ -51,6 +51,7 @@ PAR_STK=1	# use branchless code to distinguish PUSH/POP from LD/ST?
 PAR_SBIW=1	# use branchless code to distinguish ADIW and SBIW?
 
 /* don't touch these */
+SFLAG    = 1    # correct emulation of the S flag (avoids double-conversions of flags)
 RAMEND   = SRAM + IOEND
 BIGPC    = FLASHEND > 0xFFFF
 
@@ -148,6 +149,7 @@ OF = 1<<11
 SF = 1<<7
 ZF = 1<<6
 CF = 1<<0
+RF = 1<<1  # reserved flag, always set to 1 by x86
 
 .if FASTFLAG
 .data
@@ -174,6 +176,12 @@ flagcvt:
 # that writes to it (via SES/CLS or SBI/CBI/OUT/ST) get ignored.
 # converts ebx from x86 FLAGS to avr avr_SREG -> eax
 .macro avr_flags ebx
+local skip
+    .if SFLAG
+    test bl, 2
+    mov al, [avr_SREG]
+    jz skip
+    .endif
     .if FASTFLAG
     and ebx, 0x8d1
     lea eax, [ebx*8+ebx]
@@ -184,8 +192,7 @@ flagcvt:
     and ah, 0xC0
     or al, ah
     mov [avr_SREG], al
-    .exitm
-    .endif
+    .else
     mov eax, ebx
     and eax, 0x8d1
     lea eax, [eax*8+eax]
@@ -203,17 +210,20 @@ flagcvt:
     and al, 0xC0
     or al, ah
     mov [avr_SREG], al
+    .endif
+skip:
 .endm
 
-# converts the given flags (in edx) back to x86 FLAGS (in ebx)
+# converts the given flags (in al) back to x86 FLAGS (in ebx)
 .macro load_flags ebx
     mov ah, al
     mov ecx, eax
     shl cl, 2
     shr ecx, 3
-    and ecx, 0xF0
-    and eax, 0xF0F
-    lea ebx, [ecx+eax]
+    and ecx, 0xD0
+    and eax, 0x801
+    lea bx, [ecx+eax]
+    # note: bit 2 of flags will be cleared after load_flags, but should be 1 on 'real' x86 flags
 .endm
 
 .macro imm
@@ -322,10 +332,10 @@ popa
     pop eax
     and ebx, ~(flags)
     .ifnc <special>, <shift>
-    and eax, flags
+    and eax, (flags)|RF  # make sure the 'reserved bit' is preserved
     or ebx, eax
     .else
-    and eax, SF+ZF+CF
+    and eax, SF+ZF+CF+RF
     or ebx, eax
     shl eax, 4
     shr al, 1
@@ -345,7 +355,7 @@ popa
     .else
     pop eax
     and ebx, ~(flags)
-    and eax,  flags
+    and eax,  (flags)|RF
     or ebx, eax
     .endif
     resume
@@ -1015,7 +1025,7 @@ e_sbiw_adiw:
     mov [avr_ADDR+edx*2+24], cx
     add esp, 8
     and ebx, ~(SF+OF+ZF+CF)
-    and eax, SF+OF+ZF+CF
+    and eax, SF+OF+ZF+CF+RF
     or ebx, eax
     resume
 .else
@@ -1025,7 +1035,7 @@ e_sbiw_adiw:
     pushf
     pop eax
     and ebx, ~(SF+OF+ZF+CF)
-    and eax, SF+OF+ZF+CF
+    and eax, SF+OF+ZF+CF+RF
     or ebx, eax
     resume
 1:  sub si, cx
@@ -1033,7 +1043,7 @@ e_sbiw_adiw:
     pushf
     pop eax
     and ebx, ~(SF+OF+ZF+CF)
-    and eax, SF+OF+ZF+CF
+    and eax, SF+OF+ZF+CF+RF
     or ebx, eax
     resume
 .endif
