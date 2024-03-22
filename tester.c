@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <pthread.h>
@@ -288,7 +289,7 @@ static void *fake_console(void *threadid)
 			if(avr_IO[UCSR0B] & (TXC|UDRE))
 				avr_INT = 1;
 #endif
-			putchar(c);
+			assert(putchar(c) != EOF);
 #ifdef BAUD
 			usleep(10000000/BAUD);
 #endif
@@ -421,7 +422,7 @@ void avr_io_out(int port, unsigned char prev)
 		int c;
 	case UDR0:
 		c = avr_IO[port];
-		putchar(c);
+		assert(putchar(c) != EOF);
 		OR(avr_IO[UCSR0A], TXC|UDRE);
 		if(avr_IO[UCSR0B] & (TXC|UDRE))
 			avr_INT = 1;
