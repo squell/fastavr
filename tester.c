@@ -14,7 +14,7 @@
 #include <signal.h>
 #include "ihexread.h"
 
-/* #define THREAD_IO 10 */
+#define THREAD_IO 10
 #define THREAD_TIMER 100
 #define WD_FREQ 128000/64
 
@@ -677,7 +677,7 @@ int main(int argc, char **argv)
 		case 0:
 			if(INT_reason == POWEROFF) {
 				fprintf(stderr, "%s\n", "powered down");
-				avr_reset();
+				/* avr_reset(); */
 				avr_IO[MCUSR] = BORF;
 				break;
 			} else if(INT_reason == XRESET) {
