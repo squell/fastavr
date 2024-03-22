@@ -21,6 +21,9 @@
 /* should the emulator quit if the only thing that will get things moving again is a reset? */
 /* #define HALT_QUIT */
 
+/* should TIMER0 and TIMER1 be based on "wall" time or "emulated" (i.e. accelerated) time */
+/* #define TIME_ACCELERATION */
+
 extern volatile unsigned long long avr_cycle;
 extern volatile unsigned long avr_last_wdr;
 extern volatile unsigned char avr_IO[];
@@ -236,8 +239,13 @@ static unsigned long long oscillator(unsigned long long freq)
 	return ts.tv_sec*freq + ts.tv_nsec*freq / 1000000000;
 }
 
+#ifdef TIME_ACCELERATION
+/* let timer0 and timer1 be based on actual emulated AVR cycles, meaning that in essence the whole simulated world is sped up */
+instantiate_prescaler(PRESCALER01, avr_IO[GTCCR]&PSRSYNC, 0, 3, 6, 8, 10, 16, 20, avr_cycle)
+#else
 /* let timer0 and timer1 fake a 16mhz unit -- does mean that they cannot be used anymore for cycle measurement */
 instantiate_prescaler(PRESCALER01, avr_IO[GTCCR]&PSRSYNC, 0, 3, 6, 8, 10, 16, 20, oscillator(16000000))
+#endif
 instantiate_prescaler(PRESCALER2,  avr_IO[GTCCR]&PSRASY,  0, 3, 5, 6, 7, 8, 10,   (avr_IO[ASSR]&AS2)?oscillator(32768):avr_cycle)
 #define PRESCALER0 PRESCALER01
 #define PRESCALER1 PRESCALER01
