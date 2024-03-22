@@ -24,6 +24,9 @@ selftest: tester example/hello.hex tinyTwofish/ckat.hex
 	@echo "[34m--- Testing using AVRdude[0m"
 	@sleep 1
 	make -j2 selftest-avrdude
+	@echo "[34m--- Testing using AVRdude(Optiboot)[0m"
+	@sleep 1
+	make -j2 selftest-avrdude-optiboot
 
 # the tinyTwofish known-answer-test sends the mcu in an infinite loop
 # if an error is encountered; or it will stop with a sleep instruction
@@ -35,7 +38,9 @@ selftest-direct: tester example/hello.hex tinyTwofish/ckat.hex
 
 selftest-pty: tester example/hello.hex pty-hello example/hello.pty
 
-selftest-avrdude: tester example/hello.hex avrdude-upload-hello stk500boot_v2_mega2560.pty pty-hello
+selftest-avrdude: tester example/hello.hex avrdude-upload-hello ATmegaBOOT_168_atmega328_pro_8MHz.pty pty-hello
+
+selftest-avrdude-optiboot: tester example/hello.hex avrdude-upload-hello optiboot_atmega328.pty pty-hello
 
 %.pty: %.hex
 	@echo "[1mstarting the mcu preloaded with $<[0m"
@@ -51,7 +56,7 @@ pty-hello: check-pty
 
 avrdude-upload-hello: check-pty
 	@echo "[1mflashing the simulated mcu using AVRdude[0m"
-	avrdude -P /tmp/fnord -p atmega2560 -c stk500v2 -D -u -U example/hello.hex
+	avrdude -P /tmp/fnord -p atmega328p -c arduino -D -u -U example/hello.hex
 	@sync
 
 tester.o: tester.c ihexread.h

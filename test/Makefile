@@ -1,16 +1,16 @@
 .SUFFIXES: .hex .s .o .elf
 
 .c.elf:
-	avr-gcc -mmcu=atmega2560 $< -o$@
+	avr-gcc -mmcu=atmega328 $< -o$@
 
 .c.o:
-	avr-gcc -c -mmcu=atmega2560 $< -o$@
+	avr-gcc -c -mmcu=atmega328 $< -o$@
 
 .s.o:
-	avr-as --mmcu=atmega2560 $< -o$@
+	avr-as --mmcu=atmega328 $< -o$@
 
 .o.elf:
-	avr-ld -mavr6 $< -o$@
+	avr-ld $< -o$@
 
 .elf.hex:
 	avr-objcopy -O ihex $< $@
