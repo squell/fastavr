@@ -6,7 +6,9 @@
 #include <unistd.h>
 #include <time.h>
 #include <sys/time.h>
+#include <sys/stat.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <termios.h>
 #include <string.h>
 #include <signal.h>
@@ -15,6 +17,9 @@
 /* #define THREAD_IO 10 */
 #define THREAD_TIMER 100
 #define WD_FREQ 128000/64
+
+/* should the emulator quit if the only thing that will get things moving again is a reset? */
+/* #define HALT_QUIT */
 
 extern volatile unsigned long long avr_cycle;
 extern volatile unsigned long avr_last_wdr;
@@ -542,9 +547,17 @@ static void ctrl_handler(int sig)
 }
 
 static struct termios stdin_termios;
-static void restore_stdin()
+static const char *pty_link;
+
+static void restore_state()
 {
+	if(pty_link) unlink(pty_link);
 	tcsetattr(STDIN_FILENO, TCSANOW, &stdin_termios);
+}
+
+static void killed()
+{
+	abort();
 }
 
 static pthread_t signal_thread;
@@ -570,9 +583,27 @@ void avr_self_program(int addr, int value)
 
 int main(int argc, char **argv)
 {
+	tcgetattr(STDIN_FILENO, &stdin_termios);
+	atexit(restore_state);
+
+	if(argv[1] && strncmp(argv[1], "-pty", 4) == 0) {
+		extern const char* make_stdin_pty(void);
+		const char *pty = make_stdin_pty();
+		const char *sym = argv[1]+5;
+		if(sym[-1] != '\0') {
+			if(symlink(pty, sym) != 0) {
+				fprintf(stderr, "could not create symbolic link %s\n", sym);
+				return 2;
+			}
+			pty_link = pty = sym;
+		}
+		fprintf(stderr, "connecting terminal: %.*s%s\n", (pty[0]!='/')*2, "./", pty_link=pty);
+		++argv;
+	}
+
 	memset(avr_FLASH, 0xFF, 0x40000);
 	if(!argv[1]) {
-		fprintf(stderr, "usage: tester flash.hex [eeprom.hex]]\n");
+		fprintf(stderr, "usage: tester [-pty[:symlink]] flash.hex [eeprom.hex]]\n");
 		return 2;
 	} else {
 		int n = ihex_read(argv[1], avr_FLASH, 0x40000, &avr_BOOT_PC);
@@ -595,19 +626,21 @@ int main(int argc, char **argv)
 		eeprom_nonvolatile = n;
 	}
 
-	extern const char* make_stdin_pty(void);
-	fprintf(stderr, "connecting terminal: %s\n", make_stdin_pty());
-
 	signal(SIGINT,  ctrl_handler);
 	signal(SIGQUIT, ctrl_handler);
-	if(isatty(STDOUT_FILENO)) setbuf(stdout, NULL);
+	signal(SIGABRT, restore_state);
+	signal(SIGTERM, killed);
 
+	if(isatty(STDOUT_FILENO)) {
+		setbuf(stdout, NULL);
+	} else {
+		/* make sure output appears soon-ish in a pipe */
+		struct stat s;
+		if(fstat(STDOUT_FILENO, &s) == 0 && S_ISFIFO(s.st_mode))
+			setvbuf(stdout, NULL, _IOLBF, 0);
+	}
 	if(isatty(STDIN_FILENO)) {
-		struct termios ctrl;
-		tcgetattr(STDIN_FILENO, &ctrl);
-		stdin_termios = ctrl;
-		atexit(restore_stdin);
-		signal(SIGABRT, restore_stdin);
+		struct termios ctrl = stdin_termios;
 		ctrl.c_lflag &= ~ICANON; /* make stdin unbuffered */
 		tcsetattr(STDIN_FILENO, TCSANOW, &ctrl);
 	}
@@ -621,7 +654,7 @@ int main(int argc, char **argv)
 #else
 	signal(SIGIO, io_input_handler);
 	fcntl(STDIN_FILENO, F_SETOWN, getpid());
-	fcntl(STDIN_FILENO, F_SETFL, O_RDONLY | O_ASYNC | O_NONBLOCK);
+	fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) | O_ASYNC | O_NONBLOCK);
 #endif
 	pthread_create(&signal_thread, NULL, signal_catcher, NULL);
 #ifdef THREAD_TIMER
@@ -733,9 +766,32 @@ int main(int argc, char **argv)
 			fprintf(stderr, "%s\n", "mcu spinlocked");
 			if(avr_SREG & 0x80) goto wait_for_interrupt;
 			wait_for_reset:
-			while(!(avr_INT && INT_reason != INTR)) /* wait for a hard reset */
+			fprintf(stderr, "%s\n", "halted");
+			if(!pty_link) break;
+#ifdef HALT_QUIT
+			/* this keeps a named terminal alive until someone can read from it */
+			fcntl(STDIN_FILENO, F_SETFL, fcntl(STDIN_FILENO, F_GETFL) & ~O_NONBLOCK);
+			while(getchar()!=EOF) sched_yield();
+			break;
+#else
+			while(!(avr_INT && INT_reason != INTR)) { /* wait for a hard reset */
+#    ifndef NOHUP
+				struct pollfd info[1] = { STDOUT_FILENO, POLLHUP, };
+				if(poll(info, 1, 0) != 0) { /* exception: stop if no-one is listening */
+					/* exception: ignore the HUP of the programmer */
+					static int hup_count = 0;
+					if(avr_BOOT_PC && hup_count++ == 0) {
+						while(!avr_INT && poll(info, 1, 0) != 0) sched_yield();
+						continue;
+					}
+					fprintf(stderr, "%s\n", "hangup");
+					goto halt;
+				}
+#    endif
 				sched_yield();
+			}
 			continue;
+#endif
 		default:
 			fprintf(stderr, "unexpected situation: PC=%04lx instruction=%04x\n", avr_PC-1, avr_FLASH[avr_PC-1]);
 			break;
@@ -745,7 +801,8 @@ int main(int argc, char **argv)
 #ifdef THREAD_IO
 	while(uart_num) sched_yield();
 #endif
-	fprintf(stderr, "%s\n", "done");
+halt:	fprintf(stderr, "%s\n", "done");
+
 	avr_debug(avr_PC-1);
 	return 0;
 }
