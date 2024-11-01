@@ -127,15 +127,17 @@ BIGPC    = FLASHEND > 0xFFFF
 
 .text
 
-.macro debug src
-pusha
+.macro debug
+.irp reg, rax, rax, rcx, rdx, rdi, rsi, r8, r9, r10, r11
+push \reg
+.endr
 pushf
-lea eax, [src]
-push eax
-call avr_deb
-pop eax
+avr_flags ebx
+call avr_debug
 popf
-popa
+.irp reg, r11, r10, r9, r8, rsi, rdi, rdx, rcx, rax, rax
+pop \reg
+.endr
 .endm
 
 .if (FLASHEND+1) & FLASHEND
@@ -265,10 +267,12 @@ skip:
 .macro iosignal dir, port
     push rcx
     push rdx
-    lea eax, port
-    push rax
+    push rsi
+    push rdi
+    lea rdi, port
     call avr_io_\dir
-    pop rdx
+    pop rdi
+    pop rsi
     pop rdx
     pop rcx
 .endm
@@ -289,12 +293,7 @@ skip:
 
 .if DEBUG
 FASTRESUME = 0
-pusha
-avr_flags ebx
-push edi
-call avr_debug
-pop eax
-popa
+    debug
 .endif
     add qword ptr [avr_cycle], 1
     inc edi
@@ -662,31 +661,45 @@ io_bit:
     jc 1f
     lock btr [avr_IO+edx], ecx
     setc al
-    push rax
-    push rcx
-    push rdx
+    push rsi
+    push rdi
+    mov rdx, rax
+    mov rsi, rcx
+    mov rdi, rdx
     call avr_io_out_bit
-    add rsp, 3*8
+    pop rdi
+    pop rsi
     resume
 1:  lock bts [avr_IO+edx], ecx
     setc al
-    push rax
-    push rcx
-    push rdx
+    push rsi
+    push rdi
+    mov rdx, rax
+    mov rsi, rcx
+    mov rdi, rdx
     call avr_io_out_bit
-    add rsp, 3*8
+    pop rdi
+    pop rsi
     resume
 
 io_bit_skip:
     btr ecx, 4 # CF = skip if set
     setc al
+    sub rsp, 8
+    push rdi
+    push rsi
     push rax
     push rcx
     push rdx
+    mov rdi, rdx
+    mov rsi, rcx
     call avr_io_in_bit
     pop rdx
     pop rcx
     pop rax
+    pop rsi
+    pop rdi
+    add rsp, 8
     bt [avr_IO+edx], ecx
     sbb al, 0  # ZF = condition matched
     jz skipins
@@ -1020,10 +1033,10 @@ e_sbiw_adiw:
     add cx, [avr_ADDR+edx*2+24]
     pushf
     test eax, eax
-    mov eax, [rsp+rax*8] # load the appropriate flags in eax         FNORD 8 or 4
+    mov eax, [rsp+rax*8] # load the appropriate flags in eax
     cmovnz ecx, esi      # and the appropriate result in ecx
     mov [avr_ADDR+edx*2+24], cx
-    add esp, 8
+    add rsp, 2*8
     and ebx, ~(SF+OF+ZF+CF)
     and eax, SF+OF+ZF+CF+RF
     or ebx, eax
@@ -1132,10 +1145,12 @@ f_lpm_spm_r0:
     or esi, eax
 .endif
     movzx eax, word ptr [avr_ADDR]
-    push rax
+    push rdi
     push rsi
+    mov rsi, rax
     call avr_self_program
-    add rsp, 2*8
+    pop rsi
+    pop rdi
     resume
 
 .p2align 3
@@ -1298,14 +1313,14 @@ interrupt:
 f_des:
     bt ebx, 4 # copy H to carry
     sbb eax, eax
-    push rax
-    push rdx
-    mov rax, offset avr_ADDR+8
-    push rax
-    sub eax, 8
-    push rax
+    push rdi
+    push rsi
+    mov rcx, rax
+    mov rsi, offset avr_ADDR+8
+    lea rdi, [rsi-8]
     call avr_des_round
-    add esp, 4*8
+    pop rsi
+    pop rdi
     resume
 
 unhandled:

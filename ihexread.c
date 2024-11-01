@@ -44,12 +44,12 @@ static int hex_byte(const char *p)
 	return value;
 }
 
-ssize_t ihex_read(const char *fname, void *image_ptr, size_t capacity, unsigned long *boot_addr)
+ssize_t ihex_read(const char *fname, void *image_ptr, size_t capacity, unsigned int *boot_addr)
 {
 	unsigned char *image = image_ptr;
 	FILE *f;
 	char buffer[1024];
-	unsigned long int segment = 0, base = 0, lnr = 0;
+	unsigned int segment = 0, base = 0, lnr = 0;
 	size_t size = 0;
 
 	buffer[1023] = -1;
@@ -64,11 +64,11 @@ ssize_t ihex_read(const char *fname, void *image_ptr, size_t capacity, unsigned 
 		int type, len, cksum, i;
 		long int addr;
 		if(buffer[1023] == '\0') {
-			fprintf(stderr, "%s:%ld: lines are too long\n", fname, lnr);
+			fprintf(stderr, "%s:%d: lines are too long\n", fname, lnr);
 			goto abort;
 		}
 		if(buffer[0] != ':') {
-			fprintf(stderr, "%s:%ld: line not starting with ':'\n", fname, lnr);
+			fprintf(stderr, "%s:%d: line not starting with ':'\n", fname, lnr);
 			goto abort;
 		}
 
@@ -76,7 +76,7 @@ ssize_t ihex_read(const char *fname, void *image_ptr, size_t capacity, unsigned 
 		addr = hex_byte(buffer+3)<<8 | hex_byte(buffer+5);
 		type = hex_byte(buffer+7);
 		if(len < 0 || addr < 0 || type < 0) {
-			fprintf(stderr, "%s:%ld: not hexadecimal data\n", fname, lnr);
+			fprintf(stderr, "%s:%d: not hexadecimal data\n", fname, lnr);
 			goto abort;
 		}
 
@@ -84,14 +84,14 @@ ssize_t ihex_read(const char *fname, void *image_ptr, size_t capacity, unsigned 
 		if(base + len >= size)
 			size = base + len;
 		if(size > capacity) {
-			fprintf(stderr, "%s:%ld: ihex size exceeds capacity\n", fname, lnr);
+			fprintf(stderr, "%s:%d: ihex size exceeds capacity\n", fname, lnr);
 			goto abort;
 		}
 
 		if(type == 0) for(i=0; i < len; i++) {
 			int byte = hex_byte(buffer+9+2*i);
 			if(byte < -1) {
-				fprintf(stderr, "%s:%ld: not hexadecimal data\n", fname, lnr);
+				fprintf(stderr, "%s:%d: not hexadecimal data\n", fname, lnr);
 				goto abort;
 			}
 			if(type == 0)
@@ -105,17 +105,17 @@ ssize_t ihex_read(const char *fname, void *image_ptr, size_t capacity, unsigned 
 			*boot_addr = (hex_byte(buffer+ 9)<<8 | hex_byte(buffer+11)) * 16 +
 				     (hex_byte(buffer+13)<<8 | hex_byte(buffer+15));
 		} else {
-			fprintf(stderr, "%s:%ld: unsupport frame type: type %d, %d bytes\n", fname, lnr, type, len);
+			fprintf(stderr, "%s:%d: unsupport frame type: type %d, %d bytes\n", fname, lnr, type, len);
 			goto abort;
 		}
 
 		cksum = hex_byte(buffer+9+2*len);
 		if(hex_byte_cksum != 0) {
-			fprintf(stderr, "%s:%ld: checksum error\n", fname, lnr);
+			fprintf(stderr, "%s:%d: checksum error\n", fname, lnr);
 			goto abort;
 		}
 	}
-	fprintf(stderr, "%s:%ld: missing end-of-file record\n", fname, lnr);
+	fprintf(stderr, "%s:%d: missing end-of-file record\n", fname, lnr);
 abort:
 	fclose(f);
 	return -1;

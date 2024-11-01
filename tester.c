@@ -58,13 +58,13 @@ void eeprom_commit(void)
 }
 
 /* dump the emulation state */
-void avr_debug(unsigned long ip)
+void avr_debug(unsigned int ip)
 {
 	int i;
 	fprintf(stderr, "%10lld: ", avr_cycle);
 	for(i=0; i < 32; i++)
 	fprintf(stderr, "%02x ", avr_ADDR[i+0x00]);
-	fprintf(stderr, "SP=%04x, SREG=%02x, PC=%04lx [%04x]", avr_SP, avr_SREG, ip, avr_FLASH[ip]);
+	fprintf(stderr, "SP=%04x, SREG=%02x, PC=%04x [%04x]", avr_SP, avr_SREG, ip, avr_FLASH[ip]);
 	fprintf(stderr, "\n");
 	eeprom_commit();
 }
@@ -102,12 +102,12 @@ enum mcusr_bits {
 
 void watchdog(int alarm)
 {
-	static unsigned long last_wdr;
-	static unsigned long timer;
+	static unsigned int last_wdr;
+	static unsigned int timer;
 
 	unsigned char wdtcr = avr_IO[WDTCSR];
-	unsigned long cur = avr_last_wdr;
-	unsigned long threshold = 2ul << ((wdtcr&0x20)/4 + (wdtcr&0x7)) % 10;
+	unsigned int cur = avr_last_wdr;
+	unsigned int threshold = 2ul << ((wdtcr&0x20)/4 + (wdtcr&0x7)) % 10;
 	if(cur == last_wdr && wdtcr&(WDIE|WDE) && ++timer > threshold) {
 		timer = 0;
 		if(wdtcr & WDIE) {
@@ -629,7 +629,7 @@ int main(int argc, char **argv)
 			return 2;
 		}
 		avr_BOOT_PC >>= 1;
-		fprintf(stderr, "%d bytes read, startup at %04lX\n", n, avr_BOOT_PC);
+		fprintf(stderr, "%d bytes read, startup at %04X\n", n, avr_BOOT_PC);
 	}
 
 	memset(eeprom, 0xFF, sizeof eeprom);
@@ -810,7 +810,7 @@ int main(int argc, char **argv)
 			continue;
 #endif
 		default:
-			fprintf(stderr, "unexpected situation: PC=%04lx instruction=%04x\n", avr_PC-1, avr_FLASH[avr_PC-1]);
+			fprintf(stderr, "unexpected situation: PC=%04x instruction=%04x\n", avr_PC-1, avr_FLASH[avr_PC-1]);
 			break;
 		}
 		break;
