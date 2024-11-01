@@ -25,12 +25,12 @@
 /* #define TIME_ACCELERATION */
 
 extern volatile unsigned long long avr_cycle;
-extern volatile unsigned long avr_last_wdr;
+extern volatile unsigned int avr_last_wdr;
 extern volatile unsigned char avr_IO[];
 extern volatile unsigned char avr_INT;
-extern volatile unsigned long avr_INTR;
+extern volatile unsigned int avr_INTR;
 
-extern unsigned long avr_PC, avr_BOOT_PC;
+extern unsigned int avr_PC, avr_BOOT_PC;
 extern unsigned char avr_ADDR[];
 extern unsigned short int avr_FLASH[];
 extern unsigned short int avr_SP;

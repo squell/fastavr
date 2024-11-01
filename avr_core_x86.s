@@ -1,4 +1,12 @@
 /*
+TODO
+- align stack on 16 byte
+- shadow space?
+- preserved registers are: RBX,RBP, R12-R15
+- arguments are passed in RDI, RSI, RDX, RCX, R8, R9
+- modify "call" sites and functions with arguments
+*/
+/*
 
     AVR simulator (x86 version)
     Copyright (C) 2014, 2016 Marc Schoolderman
@@ -255,14 +263,14 @@ skip:
 .endm
 
 .macro iosignal dir, port
-    push ecx
-    push edx
+    push rcx
+    push rdx
     lea eax, port
-    push eax
+    push rax
     call avr_io_\dir
-    pop edx
-    pop edx
-    pop ecx
+    pop rdx
+    pop rdx
+    pop rcx
 .endm
 
 .macro decode_next_instr service_ints=INTR
@@ -288,14 +296,14 @@ call avr_debug
 pop eax
 popa
 .endif
-    add dword ptr [avr_cycle], 1
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], 1
     inc edi
 .if service_ints
     mov ebp, [avr_INTR]
-    jmp [decode_table+eax*4+ebp]
+    add ebp, ebp    # FNORD
+    jmp [decode_table+eax*8+ebp]
 .else
-    jmp [decode_table+eax*4]
+    jmp [decode_table+eax*8]
 .endif
 .endm
 
@@ -325,12 +333,12 @@ popa
     .endif
     pushf
     .ifc <flags>, <>
-    pop ebx
+    pop rbx
     .ifc <special>, <borrow>
     and ebx, ebp
     .endif
     .else
-    pop eax
+    pop rax
     and ebx, ~(flags)
     .ifnc <special>, <shift>
     and eax, (flags)|RF  # make sure the 'reserved bit' is preserved
@@ -352,9 +360,9 @@ popa
     op byte ptr [avr_ADDR+edx]
     pushf
     .ifc <flags>, <>
-    pop ebx
+    pop rbx
     .else
-    pop eax
+    pop rax
     and ebx, ~(flags)
     and eax,  (flags)|RF
     or ebx, eax
@@ -366,25 +374,20 @@ popa
 avr_reset:
     mov eax, [avr_BOOT_PC]
     mov [avr_PC], eax
-    xor eax, eax
-    push edi
-    lea edi, [avr_IO]
+    xor rax, rax
+    lea edi, [rip+avr_IO]
     lea ecx, [IOEND-0x20]
     cld
     rep stosb
-    pop edi
-    mov [avr_cycle], eax
-    mov [avr_cycle+4], eax
+    mov [avr_cycle], rax
     mov [avr_last_wdr], eax
     mov word ptr [avr_SP], RAMEND
     ret
 
 .p2align 3
 avr_run:
-    push ebp
-    push ebx
-    push edi
-    push esi
+    push rbp
+    push rbx
 
     mov al, [avr_SREG]
     load_flags ebx
@@ -517,8 +520,7 @@ skipins:
     adc edi, 0
     sub esi, edi
     neg esi
-    add [avr_cycle], esi
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], rsi
     resume
 
 .p2align 3
@@ -532,8 +534,7 @@ e_brbs:
     lea eax, [edi+edx]
     cmovc edi, eax
     setc cl
-    add [avr_cycle], ecx
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], rcx
     resume
 
 .p2align 3
@@ -547,8 +548,7 @@ e_brbc:
     lea eax, [edi+edx]
     cmovnc edi, eax
     setnc cl
-    add [avr_cycle], ecx
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], rcx
     resume
 
 .p2align 3
@@ -577,11 +577,10 @@ rjmp:
 .if BIGPC
     setc al
     lea eax, [eax*2+1]
-    add dword ptr [avr_cycle], eax
+    add qword ptr [avr_cycle], rax
 .else
-    adc dword ptr [avr_cycle], 1
+    adc qword ptr [avr_cycle], 1
 .endif
-    adc dword ptr [avr_cycle+4], 0
 .if ABORTDETECT
     cmp edx, -1
     mov esi, 3
@@ -658,37 +657,36 @@ io_bit:
     rcl edx, 1
     btr edx, 5 # CF <-> skip-ins
     jc io_bit_skip
-    add dword ptr [avr_cycle], 1
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], 1
     btr ecx, 4 # CF = set
     jc 1f
     lock btr [avr_IO+edx], ecx
     setc al
-    push eax
-    push ecx
-    push edx
+    push rax
+    push rcx
+    push rdx
     call avr_io_out_bit
-    add esp, 12
+    add rsp, 3*8
     resume
 1:  lock bts [avr_IO+edx], ecx
     setc al
-    push eax
-    push ecx
-    push edx
+    push rax
+    push rcx
+    push rdx
     call avr_io_out_bit
-    add esp, 12
+    add rsp, 3*8
     resume
 
 io_bit_skip:
     btr ecx, 4 # CF = skip if set
     setc al
-    push eax
-    push ecx
-    push edx
+    push rax
+    push rcx
+    push rdx
     call avr_io_in_bit
-    pop edx
-    pop ecx
-    pop eax
+    pop rdx
+    pop rcx
+    pop rax
     bt [avr_IO+edx], ecx
     sbb al, 0  # ZF = condition matched
     jz skipins
@@ -723,8 +721,7 @@ io_bit_skip:
 # with tweaks added to support lpm, lds and pop/push
 .p2align 3
 ld_st:
-    add dword ptr [avr_cycle], 1
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], 1
     mov eax, ecx
     xor eax, 0xC
     and eax, 0xF
@@ -810,8 +807,7 @@ check_io:
 e_lpm:
     test ecx, 0x10
     jnz e_xch_la
-    add dword ptr [avr_cycle], 1
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], 1
     movzx esi, word ptr [Z]
 .if BIGPC
     mov al, [RAMPZ]
@@ -859,8 +855,7 @@ e_xch_la:
     cmovnc edx, ebp
     cmovnz eax, edx
     mov [avr_ADDR+esi], al
-    add dword ptr [avr_cycle], 1
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], 1
     resume
 
 /*
@@ -889,8 +884,7 @@ sd dddd 1111 pop/push
 #------------------
 .p2align 3
 ldd_std:
-    add dword ptr [avr_cycle], 1
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], 1
     mov esi, eax
     and eax, 0xF
     and esi, 0x3
@@ -933,8 +927,7 @@ umult:
     and bl, ~(ZF+CF)
     or bl, cl
     or bl, al
-    add dword ptr [avr_cycle], 1
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], 1
     resume
 
 .p2align 3
@@ -1009,12 +1002,11 @@ e_1op_misc:
     and eax, 0xF
     btr ecx, 4
     jc e_sbiw_adiw
-    jmp [subdecode_table+eax*4]
+    jmp [subdecode_table+eax*8]
 
 # this is a bit painful to write without using any further conditional jumps
 e_sbiw_adiw:
-    add dword ptr [avr_cycle], 1
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], 1
     mov eax, edx
     and eax, 0xC
     and edx, 0x13
@@ -1028,7 +1020,7 @@ e_sbiw_adiw:
     add cx, [avr_ADDR+edx*2+24]
     pushf
     test eax, eax
-    mov eax, [esp+eax*4] # load the appropriate flags in eax
+    mov eax, [rsp+rax*8] # load the appropriate flags in eax         FNORD 8 or 4
     cmovnz ecx, esi      # and the appropriate result in ecx
     mov [avr_ADDR+edx*2+24], cx
     add esp, 8
@@ -1041,7 +1033,7 @@ e_sbiw_adiw:
     add si, cx
     mov [avr_ADDR+edx*2+24], si
     pushf
-    pop eax
+    pop rax
     and ebx, ~(SF+OF+ZF+CF)
     and eax, SF+OF+ZF+CF+RF
     or ebx, eax
@@ -1049,7 +1041,7 @@ e_sbiw_adiw:
 1:  sub si, cx
     mov [avr_ADDR+edx*2+24], si
     pushf
-    pop eax
+    pop rax
     and ebx, ~(SF+OF+ZF+CF)
     and eax, SF+OF+ZF+CF+RF
     or ebx, eax
@@ -1101,8 +1093,7 @@ f_ret:
 .endif
     mov [avr_SP], ax
 
-    add dword ptr [avr_cycle], 3-BIGPC
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], 3-BIGPC
     resume
 
 .p2align 3
@@ -1124,8 +1115,7 @@ f_misc:
 
 .p2align 3
 f_lpm_spm_r0:
-    add dword ptr [avr_cycle], 1
-    adc dword ptr [avr_cycle+4], 0
+    add qword ptr [avr_cycle], 1
     lea ecx, [edx*2-4] # 100->100, 101->110, so (e)lpm->(e)lpm r0
     xor edx, edx
     cmp ecx, 0x8
@@ -1142,10 +1132,10 @@ f_lpm_spm_r0:
     or esi, eax
 .endif
     movzx eax, word ptr [avr_ADDR]
-    push eax
-    push esi
+    push rax
+    push rsi
     call avr_self_program
-    add esp, 8
+    add rsp, 2*8
     resume
 
 .p2align 3
@@ -1225,13 +1215,12 @@ f_ind_jump:
 .if BIGPC
     mov di, word ptr [Z]
     or edx, 1
-    add dword ptr [avr_cycle], edx
+    add qword ptr [avr_cycle], rdx
 .else
     movzx edi, word ptr [Z]
     shr edx, 2
-    adc dword ptr [avr_cycle], 1
+    adc qword ptr [avr_cycle], 1
 .endif
-    adc dword ptr [avr_cycle+4], 0
     resume
 
 
@@ -1271,11 +1260,10 @@ f_abs_jump:
     adc al, 0
     adc al, 3
     movzx eax, al
-    add dword ptr [avr_cycle], eax
+    add qword ptr [avr_cycle], rax
 .else
-    adc dword ptr [avr_cycle], 2
+    adc qword ptr [avr_cycle], 2
 .endif
-    adc dword ptr [avr_cycle+4], 0
     resume
 
 .if INTR
@@ -1286,9 +1274,8 @@ interrupt:
     jl redo_exit
     btr dword ptr [avr_SREG], 7     # if IF is clear, ignore the interrupt
     jc 1f
-    jmp [decode_table+eax*4]
-1:  add dword ptr [avr_cycle], 3-BIGPC
-    adc dword ptr [avr_cycle+4], 0
+    jmp [decode_table+eax*8]
+1:  add qword ptr [avr_cycle], 3-BIGPC
     dec edi
     mov [avr_INTR], esi
     movzx edx, word ptr [avr_SP]
@@ -1311,14 +1298,14 @@ interrupt:
 f_des:
     bt ebx, 4 # copy H to carry
     sbb eax, eax
-    push eax
-    push edx
-    mov eax, offset avr_ADDR+8
-    push eax
+    push rax
+    push rdx
+    mov rax, offset avr_ADDR+8
+    push rax
     sub eax, 8
-    push eax
+    push rax
     call avr_des_round
-    add esp, 16
+    add esp, 4*8
     resume
 
 unhandled:
@@ -1339,19 +1326,15 @@ exit:
     avr_flags ebx
     mov [avr_PC], edi
     mov eax, esi
-    pop esi
-    pop edi
-    pop ebx
-    pop ebp
+    pop rbx
+    pop rbp
     ret
 
 .if INTR
 .p2align 3
 avr_step:
-    push ebp
-    push ebx
-    push edi
-    push esi
+    push rbp
+    push rbx
 
     mov al, [avr_SREG]
     load_flags ebx
@@ -1388,98 +1371,97 @@ avr_des_round:
 
 .p2align 2
 decode_table:
-/* 0000 00 */ .long nop_movw_mul
-/* 0000 01 */ .long e_cpc
-/* 0000 10 */ .long e_sbc
-/* 0000 11 */ .long e_add
-/* 0001 00 */ .long e_cpse
-/* 0001 01 */ .long e_cp
-/* 0001 10 */ .long e_sub
-/* 0001 11 */ .long e_adc
-/* 0010 00 */ .long e_and
-/* 0010 01 */ .long e_eor
-/* 0010 10 */ .long e_or
-/* 0010 11 */ .long e_mov
-/* 0011 00 */ .long e_cpi
-/* 0011 01 */ .long e_cpi
-/* 0011 10 */ .long e_cpi
-/* 0011 11 */ .long e_cpi
-/* 0100 00 */ .long e_sbci
-/* 0100 01 */ .long e_sbci
-/* 0100 10 */ .long e_sbci
-/* 0100 11 */ .long e_sbci
-/* 0101 00 */ .long e_subi
-/* 0101 01 */ .long e_subi
-/* 0101 10 */ .long e_subi
-/* 0101 11 */ .long e_subi
-/* 0110 00 */ .long e_ori
-/* 0110 01 */ .long e_ori
-/* 0110 10 */ .long e_ori
-/* 0110 11 */ .long e_ori
-/* 0111 00 */ .long e_andi
-/* 0111 01 */ .long e_andi
-/* 0111 10 */ .long e_andi
-/* 0111 11 */ .long e_andi
-/* 1000 00 */ .long ldd_std
-/* 1000 01 */ .long ldd_std
-/* 1000 10 */ .long ldd_std
-/* 1000 11 */ .long ldd_std
-/* 1001 00 */ .long ld_st
-/* 1001 01 */ .long e_1op_misc
-/* 1001 10 */ .long io_bit
-/* 1001 11 */ .long umult
-/* 1010 00 */ .long ldd_std
-/* 1010 01 */ .long ldd_std
-/* 1010 10 */ .long ldd_std
-/* 1010 11 */ .long ldd_std
-/* 1011 00 */ .long io_in
-/* 1011 01 */ .long io_in1
-/* 1011 10 */ .long io_out
-/* 1011 11 */ .long io_out1
-/* 1100 00 */ .long rjmp
-/* 1100 01 */ .long rjmp
-/* 1100 10 */ .long rjmp
-/* 1100 11 */ .long rjmp
-/* 1101 00 */ .long rcall
-/* 1101 01 */ .long rcall
-/* 1101 10 */ .long rcall
-/* 1101 11 */ .long rcall
-/* 1110 00 */ .long e_ldi
-/* 1110 01 */ .long e_ldi
-/* 1110 10 */ .long e_ldi
-/* 1110 11 */ .long e_ldi
-/* 1111 00 */ .long e_brbs
-/* 1111 01 */ .long e_brbc
-/* 1111 10 */ .long e_bst_bld
-/* 1111 11 */ .long e_sbrcs
+/* 0000 00 */ .quad nop_movw_mul
+/* 0000 01 */ .quad e_cpc
+/* 0000 10 */ .quad e_sbc
+/* 0000 11 */ .quad e_add
+/* 0001 00 */ .quad e_cpse
+/* 0001 01 */ .quad e_cp
+/* 0001 10 */ .quad e_sub
+/* 0001 11 */ .quad e_adc
+/* 0010 00 */ .quad e_and
+/* 0010 01 */ .quad e_eor
+/* 0010 10 */ .quad e_or
+/* 0010 11 */ .quad e_mov
+/* 0011 00 */ .quad e_cpi
+/* 0011 01 */ .quad e_cpi
+/* 0011 10 */ .quad e_cpi
+/* 0011 11 */ .quad e_cpi
+/* 0100 00 */ .quad e_sbci
+/* 0100 01 */ .quad e_sbci
+/* 0100 10 */ .quad e_sbci
+/* 0100 11 */ .quad e_sbci
+/* 0101 00 */ .quad e_subi
+/* 0101 01 */ .quad e_subi
+/* 0101 10 */ .quad e_subi
+/* 0101 11 */ .quad e_subi
+/* 0110 00 */ .quad e_ori
+/* 0110 01 */ .quad e_ori
+/* 0110 10 */ .quad e_ori
+/* 0110 11 */ .quad e_ori
+/* 0111 00 */ .quad e_andi
+/* 0111 01 */ .quad e_andi
+/* 0111 10 */ .quad e_andi
+/* 0111 11 */ .quad e_andi
+/* 1000 00 */ .quad ldd_std
+/* 1000 01 */ .quad ldd_std
+/* 1000 10 */ .quad ldd_std
+/* 1000 11 */ .quad ldd_std
+/* 1001 00 */ .quad ld_st
+/* 1001 01 */ .quad e_1op_misc
+/* 1001 10 */ .quad io_bit
+/* 1001 11 */ .quad umult
+/* 1010 00 */ .quad ldd_std
+/* 1010 01 */ .quad ldd_std
+/* 1010 10 */ .quad ldd_std
+/* 1010 11 */ .quad ldd_std
+/* 1011 00 */ .quad io_in
+/* 1011 01 */ .quad io_in1
+/* 1011 10 */ .quad io_out
+/* 1011 11 */ .quad io_out1
+/* 1100 00 */ .quad rjmp
+/* 1100 01 */ .quad rjmp
+/* 1100 10 */ .quad rjmp
+/* 1100 11 */ .quad rjmp
+/* 1101 00 */ .quad rcall
+/* 1101 01 */ .quad rcall
+/* 1101 10 */ .quad rcall
+/* 1101 11 */ .quad rcall
+/* 1110 00 */ .quad e_ldi
+/* 1110 01 */ .quad e_ldi
+/* 1110 10 */ .quad e_ldi
+/* 1110 11 */ .quad e_ldi
+/* 1111 00 */ .quad e_brbs
+/* 1111 01 */ .quad e_brbc
+/* 1111 10 */ .quad e_bst_bld
+/* 1111 11 */ .quad e_sbrcs
 .rept INTR*64
-/* INT     */ .long interrupt
+/* INT     */ .quad interrupt
 .endr
 
 subdecode_table:
-/* 0000 */ .long f_com
-/* 0001 */ .long f_neg
-/* 0010 */ .long f_swap
-/* 0011 */ .long f_inc
-/* 0100 */ .long unhandled # illegal instruction
-/* 0101 */ .long f_asr
-/* 0110 */ .long f_lsr
-/* 0111 */ .long f_ror
-/* 1000 */ .long f_flag_misc
-/* 1001 */ .long f_ind_jump
-/* 1010 */ .long f_dec
-/* 1011 */ .long f_des
-/* 11xx */ .long f_abs_jump
-/* 11xx */ .long f_abs_jump
-/* 11xx */ .long f_abs_jump
-/* 11xx */ .long f_abs_jump
+/* 0000 */ .quad f_com
+/* 0001 */ .quad f_neg
+/* 0010 */ .quad f_swap
+/* 0011 */ .quad f_inc
+/* 0100 */ .quad unhandled # illegal instruction
+/* 0101 */ .quad f_asr
+/* 0110 */ .quad f_lsr
+/* 0111 */ .quad f_ror
+/* 1000 */ .quad f_flag_misc
+/* 1001 */ .quad f_ind_jump
+/* 1010 */ .quad f_dec
+/* 1011 */ .quad f_des
+/* 11xx */ .quad f_abs_jump
+/* 11xx */ .quad f_abs_jump
+/* 11xx */ .quad f_abs_jump
+/* 11xx */ .quad f_abs_jump
 
 .bss
 
 .p2align 3
 avr_cycle:
-    .long 0
-    .long 0
+    .quad 0
 avr_last_wdr:
     .long 0
 avr_PC: # can get clobbered by rcall/f_*_jump/interrupt (with avr_SP near 0)

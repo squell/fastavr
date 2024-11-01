@@ -5,9 +5,9 @@ SHELL = /bin/sh
 CC ?= cc
 AS ?= as
 
-CFLAGS  = -O2 -m32
-LDFLAGS = -m32 -pthread
-ASFLAGS = --32
+CFLAGS  = -O2
+LDFLAGS = -pthread -static
+ASFLAGS =
 
 tester: ihexread.o ihexwrite.o avr_core_x86.o tester.o makepty.o des.o
 
