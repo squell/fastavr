@@ -1,3 +1,4 @@
+// are all register-saved at all sites necessary?
 /*
 
     AVR simulator (x86 version)
@@ -1137,10 +1138,10 @@ f_lpm_spm_r0:
     shl eax, 16
     or esi, eax
 .endif
-    movzx eax, word ptr [avr_ADDR]
     push rdi
     push rsi
-    mov rsi, rax
+    mov rdi, rsi
+    movzx esi, word ptr [avr_ADDR]
     call avr_self_program
     pop rsi
     pop rdi
