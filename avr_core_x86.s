@@ -1,12 +1,4 @@
 /*
-TODO
-- align stack on 16 byte
-- shadow space?
-- preserved registers are: RBX,RBP, R12-R15
-- arguments are passed in RDI, RSI, RDX, RCX, R8, R9
-- modify "call" sites and functions with arguments
-*/
-/*
 
     AVR simulator (x86 version)
     Copyright (C) 2014, 2016 Marc Schoolderman
@@ -385,6 +377,7 @@ avr_reset:
 
 .p2align 3
 avr_run:
+    push r8
     push rbp
     push rbx
 
@@ -663,9 +656,9 @@ io_bit:
     setc al
     push rsi
     push rdi
-    mov rdx, rax
-    mov rsi, rcx
     mov rdi, rdx
+    mov rsi, rcx
+    mov rdx, rax
     call avr_io_out_bit
     pop rdi
     pop rsi
@@ -674,9 +667,9 @@ io_bit:
     setc al
     push rsi
     push rdi
-    mov rdx, rax
-    mov rsi, rcx
     mov rdi, rdx
+    mov rsi, rcx
+    mov rdx, rax
     call avr_io_out_bit
     pop rdi
     pop rsi
@@ -685,7 +678,7 @@ io_bit:
 io_bit_skip:
     btr ecx, 4 # CF = skip if set
     setc al
-    sub rsp, 8
+    push rdi
     push rdi
     push rsi
     push rax
@@ -699,7 +692,7 @@ io_bit_skip:
     pop rax
     pop rsi
     pop rdi
-    add rsp, 8
+    pop rdi
     bt [avr_IO+edx], ecx
     sbb al, 0  # ZF = condition matched
     jz skipins
@@ -1343,11 +1336,13 @@ exit:
     mov eax, esi
     pop rbx
     pop rbp
+    pop r8
     ret
 
 .if INTR
 .p2align 3
 avr_step:
+    push r8
     push rbp
     push rbx
 
@@ -1371,12 +1366,11 @@ avr_io_in_bit:
     jmp avr_io_in
 .p2align 3
 avr_io_out_bit:
-    movzx edx, byte ptr [avr_IO+edx]
-    btr edx, ecx
+    movzx esi, byte ptr [avr_IO+rdi]
+    btr esi, ecx
     shl eax, cl      # eax will contain the prev bit value
-    or edx, eax
-    mov [esp+8], edx # pass the call through to avr_io_out
-    jmp avr_io_out
+    or esi, eax
+    jmp avr_io_out   # pass the call through to avr_io_out
 .p2align 3
 avr_self_program:
 avr_des_round:
